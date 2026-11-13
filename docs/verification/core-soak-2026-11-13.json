@@ -1,0 +1,198 @@
+{
+  "passed": true,
+  "durationSeconds": 600,
+  "elapsedSeconds": 600.077,
+  "issued": 1200,
+  "reviewed": 1028,
+  "cancelled": 172,
+  "maxConcurrent": 8,
+  "restarts": 1,
+  "taskP95Ms": 867,
+  "eventLoopP99Ms": 144.441343,
+  "gcAvailable": true,
+  "samples": [
+    {
+      "seconds": 0,
+      "heapMiB": 9.464324951171875,
+      "rssMiB": 58.5078125,
+      "issued": 8,
+      "reviewed": 0,
+      "cancelled": 0,
+      "queue": 8
+    },
+    {
+      "seconds": 30,
+      "heapMiB": 10.377212524414062,
+      "rssMiB": 105.48046875,
+      "issued": 64,
+      "reviewed": 54,
+      "cancelled": 10,
+      "queue": 0
+    },
+    {
+      "seconds": 60,
+      "heapMiB": 10.411872863769531,
+      "rssMiB": 127.5859375,
+      "issued": 120,
+      "reviewed": 102,
+      "cancelled": 18,
+      "queue": 0
+    },
+    {
+      "seconds": 90,
+      "heapMiB": 9.574836730957031,
+      "rssMiB": 194.1328125,
+      "issued": 184,
+      "reviewed": 157,
+      "cancelled": 27,
+      "queue": 0
+    },
+    {
+      "seconds": 120,
+      "heapMiB": 9.584892272949219,
+      "rssMiB": 202.40234375,
+      "issued": 240,
+      "reviewed": 205,
+      "cancelled": 35,
+      "queue": 0
+    },
+    {
+      "seconds": 150,
+      "heapMiB": 9.65802001953125,
+      "rssMiB": 203.34765625,
+      "issued": 304,
+      "reviewed": 260,
+      "cancelled": 44,
+      "queue": 0
+    },
+    {
+      "seconds": 180,
+      "heapMiB": 9.659461975097656,
+      "rssMiB": 203.75,
+      "issued": 360,
+      "reviewed": 308,
+      "cancelled": 52,
+      "queue": 0
+    },
+    {
+      "seconds": 210,
+      "heapMiB": 9.63519287109375,
+      "rssMiB": 204.32421875,
+      "issued": 424,
+      "reviewed": 363,
+      "cancelled": 61,
+      "queue": 0
+    },
+    {
+      "seconds": 240,
+      "heapMiB": 9.715187072753906,
+      "rssMiB": 205.06640625,
+      "issued": 480,
+      "reviewed": 411,
+      "cancelled": 69,
+      "queue": 0
+    },
+    {
+      "seconds": 270,
+      "heapMiB": 9.81976318359375,
+      "rssMiB": 205.41796875,
+      "issued": 544,
+      "reviewed": 466,
+      "cancelled": 78,
+      "queue": 0
+    },
+    {
+      "seconds": 300,
+      "heapMiB": 9.836814880371094,
+      "rssMiB": 201.1328125,
+      "issued": 600,
+      "reviewed": 514,
+      "cancelled": 86,
+      "queue": 0
+    },
+    {
+      "seconds": 330,
+      "heapMiB": 9.965278625488281,
+      "rssMiB": 203.50390625,
+      "issued": 664,
+      "reviewed": 569,
+      "cancelled": 95,
+      "queue": 0
+    },
+    {
+      "seconds": 360,
+      "heapMiB": 10.011444091796875,
+      "rssMiB": 205.50390625,
+      "issued": 720,
+      "reviewed": 617,
+      "cancelled": 103,
+      "queue": 0
+    },
+    {
+      "seconds": 390,
+      "heapMiB": 10.006172180175781,
+      "rssMiB": 207.15625,
+      "issued": 784,
+      "reviewed": 671,
+      "cancelled": 112,
+      "queue": 1
+    },
+    {
+      "seconds": 420,
+      "heapMiB": 9.999320983886719,
+      "rssMiB": 207.7734375,
+      "issued": 840,
+      "reviewed": 720,
+      "cancelled": 120,
+      "queue": 0
+    },
+    {
+      "seconds": 450,
+      "heapMiB": 10.009330749511719,
+      "rssMiB": 208.296875,
+      "issued": 904,
+      "reviewed": 771,
+      "cancelled": 130,
+      "queue": 3
+    },
+    {
+      "seconds": 480,
+      "heapMiB": 10.064872741699219,
+      "rssMiB": 225.4453125,
+      "issued": 960,
+      "reviewed": 822,
+      "cancelled": 138,
+      "queue": 0
+    },
+    {
+      "seconds": 511,
+      "heapMiB": 10.078453063964844,
+      "rssMiB": 226.265625,
+      "issued": 1024,
+      "reviewed": 874,
+      "cancelled": 147,
+      "queue": 3
+    },
+    {
+      "seconds": 541,
+      "heapMiB": 10.084358215332031,
+      "rssMiB": 226.39453125,
+      "issued": 1080,
+      "reviewed": 925,
+      "cancelled": 155,
+      "queue": 0
+    },
+    {
+      "seconds": 571,
+      "heapMiB": 10.087150573730469,
+      "rssMiB": 226.90625,
+      "issued": 1144,
+      "reviewed": 976,
+      "cancelled": 164,
+      "queue": 4
+    }
+  ],
+  "databaseBytes": 12943360,
+  "node": "v24.16.0",
+  "platform": "win32"
+}

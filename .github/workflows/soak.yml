@@ -1,0 +1,41 @@
+name: Extended backend soak
+on:
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: 'Duration in seconds (60 to 3600)'
+        type: number
+        default: 3600
+        required: true
+permissions:
+  contents: read
+jobs:
+  soak:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    env:
+      SOAK_SECONDS: ${{ inputs.duration_seconds }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - shell: pwsh
+        run: |
+          $duration = 0
+          if (-not [int]::TryParse($env:SOAK_SECONDS, [ref]$duration) -or $duration -lt 60 -or $duration -gt 3600) { throw 'Duration must be 60..3600 seconds' }
+          npm run test:soak -- $duration
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run: npm run test:mcp-soak -- 1000
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: extended-backend-load-reports
+          path: |
+            .roundloom/soak/**/report.json
+            .roundloom/mcp-soak/**/report.json
+          retention-days: 30

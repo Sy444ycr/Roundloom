@@ -22,13 +22,14 @@ import type {
 } from "../packages/contracts/src/index.js";
 const [claude, opencode, mode] = process.argv.slice(2);
 const coding = mode === "--coding";
+const ownerAdapter = mode === "--codex" ? "codex" : "claude";
 if (!claude || !opencode)
   throw new Error("Provide Claude and OpenCode executable paths");
 const dir = mkdtempSync(join(tmpdir(), "roundloom-collaboration-"));
 const workspace = join(dir, "workspace");
 mkdirSync(workspace);
 const c = new Core(join(dir, "core.db"), [
-  new NativeAdapter("claude"),
+  new NativeAdapter(ownerAdapter),
   new AcpAdapter(),
 ]);
 const services = new Services(c, join(dir, "data"));
@@ -56,9 +57,13 @@ try {
   });
   const owner = call<Member>("members.add", {
     roomId: room.id,
-    name: "Claude implementer",
-    adapterId: "claude",
-    config: { executable: claude, cwd: workspace, timeoutMs: 90000 },
+    name: `${ownerAdapter} implementer`,
+    adapterId: ownerAdapter,
+    config: {
+      ...(ownerAdapter === "claude" ? { executable: claude } : {}),
+      cwd: workspace,
+      timeoutMs: 120000,
+    },
   });
   const task = call<Task>("tasks.assign", {
     roomId: room.id,

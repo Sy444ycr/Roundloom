@@ -8,7 +8,7 @@ import { z } from "zod";
 import { Services } from "./services.js";
 import { AcpAdapter } from "../../adapters/src/acp.js";
 import { NativeAdapter } from "../../adapters/src/native.js";
-// Trusted parent transport only: no listening TCP port and no remote authentication surface.
+// Trusted parent transport; adapters may expose authenticated, per-run loopback MCP only.
 const core = new Core(
   resolve(process.env.ROUNDLOOM_DATA_DIR ?? ".roundloom", "core.db"),
   [
