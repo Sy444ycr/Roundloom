@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
   existsSync,
+  readdirSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -26,6 +27,37 @@ const cmd = (operation: string, payload: unknown) => ({
   requestId: randomUUID(),
   operation,
   payload,
+});
+
+test("concurrent async retries share a result and shutdown rejects new service work", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "roundloom-idempotent-"));
+  const c = new Core(":memory:", [new MockAdapter()]);
+  const s = new Services(c, dir);
+  try {
+    const request = cmd("storage.backup", {});
+    const first = s.execute(request);
+    const second = s.execute(request);
+    await assert.rejects(
+      s.execute({
+        ...request,
+        operation: "members.connect",
+        payload: { memberId: "other" },
+      }),
+      { code: "CONFLICT" },
+    );
+    const [a, b] = await Promise.all([first, second]);
+    assert.deepEqual(a, b);
+    assert.deepEqual(await s.execute(request), a);
+    assert.equal(readdirSync(join(dir, "backups")).length, 1);
+    await s.close();
+    await assert.rejects(s.execute(cmd("adapters.list", {})), {
+      code: "CLOSED",
+    });
+  } finally {
+    await s.close();
+    await c.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("ACP final response answers only its assigned peer request and resumes owner", async () => {

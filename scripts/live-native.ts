@@ -4,14 +4,20 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Core } from "../packages/core/src/index.js";
 import { NativeAdapter } from "../packages/adapters/src/native.js";
+import { AcpAdapter } from "../packages/adapters/src/acp.js";
 import type { Room, Member, Run } from "../packages/contracts/src/index.js";
-const [id, executable] = process.argv.slice(2);
-if (id !== "claude" && id !== "codex")
-  throw new Error("Usage: live-native.js claude|codex [executable]");
+const [id, executable, ...args] = process.argv.slice(2);
+if (id !== "claude" && id !== "codex" && id !== "acp")
+  throw new Error(
+    "Usage: live-native.js claude|codex|acp [executable] [ACP arguments]",
+  );
 const dir = mkdtempSync(join(tmpdir(), "roundloom-live-native-"));
 const workspace = join(dir, "workspace");
 mkdirSync(workspace);
-const make = () => new Core(join(dir, "core.db"), [new NativeAdapter(id)]);
+const make = () =>
+  new Core(join(dir, "core.db"), [
+    id === "acp" ? new AcpAdapter() : new NativeAdapter(id),
+  ]);
 let c = make();
 const call = <T>(operation: string, payload: unknown) =>
   c.execute({
@@ -26,7 +32,7 @@ try {
     roomId: room.id,
     name: id,
     adapterId: id,
-    config: { cwd: workspace, executable },
+    config: { cwd: workspace, executable, ...(id === "acp" ? { args } : {}) },
   });
   const secret = randomUUID();
   for (let turn = 1; turn <= 2; turn++) {
@@ -35,6 +41,9 @@ try {
       c = make();
     }
     const previous = new Set(c.store.list<Run>("run").map((r) => r.id));
+    const previousMessages = new Set(
+      c.store.list<{ id: string }>("message", room.id).map((m) => m.id),
+    );
     call("messages.send", {
       roomId: room.id,
       recipients: [member.id],
@@ -55,11 +64,14 @@ try {
         ["succeeded", "failed", "cancelled", "unknown"].includes(r.status)
       ) {
         const expected = turn === 1 ? "ROUNDLOOM_OK" : secret;
-        ok =
-          r.status === "succeeded" &&
-          c.store
-            .list<any>("message", room.id)
-            .some((m) => m.senderId === member.id && m.text.includes(expected));
+        const response = c.store
+          .list<any>("message", room.id)
+          .filter(
+            (m) => m.senderId === member.id && !previousMessages.has(m.id),
+          )
+          .map((m) => m.text)
+          .join("");
+        ok = r.status === "succeeded" && response.includes(expected);
         console.log(
           JSON.stringify({
             adapter: id,
