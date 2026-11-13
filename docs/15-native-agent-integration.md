@@ -49,6 +49,6 @@ node dist/scripts/live-collaboration.js PATH_TO_CLAUDE_EXE PATH_TO_OPENCODE_EXE 
 
 脚本只输出状态与校验结果，不输出认证信息。编码脚本只批准目标临时文件的 Write 请求；通过后在 .roundloom/live-evidence 下保存生成代码、SQLite 快照和包含命令、退出码、摘要及产物的报告，默认不提交 Git。测试数据中的原始工作区路径随清理失效，证据用于审计，不能直接当作仍可编辑的工作区恢复。
 
-当前可用于桌面前端对接的后端预览。后续兼容性工作包括 ACP 原生跨进程恢复、Codex 主动同伴工具、更多厂商与复杂真实工程场景；桌面界面与安装包另行交付。
+当前可用于桌面前端对接的后端预览。ACP 原生跨进程恢复及后续可靠性补充见 [后端加固记录](16-backend-hardening.md)。Codex 主动同伴工具、更多厂商与复杂真实工程场景仍需扩展；桌面界面与安装包另行交付。
 
 参考：[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/typescript)、[Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)。

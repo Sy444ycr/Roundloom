@@ -79,6 +79,7 @@ export class Core {
     }));
   }
   async connectMember(memberId: string) {
+    check(!this.closing && !this.stopped, "CLOSED", "Core is closing");
     const m = this.store.get<Member>("member", memberId);
     const a = this.adapters.get(m.adapterId)!;
     const record = {
@@ -89,17 +90,21 @@ export class Core {
       capabilities: a.capabilities,
     };
     this.store.put("connection", record, m.roomId);
+    this.store.event(m.roomId, "connection.changed", record);
     try {
       const details = a.connect
         ? await a.connect(m.sessionId, m.config)
         : { available: true };
+      check(!this.closing && !this.stopped, "CLOSED", "Core is closing");
       const connected = { ...record, status: "connected", details };
       this.store.put("connection", connected, m.roomId);
       this.store.event(m.roomId, "connection.changed", connected);
       return connected;
     } catch {
+      check(!this.closing && !this.stopped, "CLOSED", "Core is closing");
       const failed = { ...record, status: "failed" };
       this.store.put("connection", failed, m.roomId);
+      this.store.event(m.roomId, "connection.changed", failed);
       throw new CoreError(
         "CONNECTION_FAILED",
         "Connection failed; check executable and authentication",
@@ -107,6 +112,7 @@ export class Core {
     }
   }
   async authenticateMember(memberId: string, methodId: string) {
+    check(!this.closing && !this.stopped, "CLOSED", "Core is closing");
     const m = this.store.get<Member>("member", memberId);
     const a = this.adapters.get(m.adapterId)!;
     check(
@@ -117,6 +123,7 @@ export class Core {
     return a.authenticate(m.sessionId, methodId);
   }
   async disconnectMember(memberId: string) {
+    check(!this.closing && !this.stopped, "CLOSED", "Core is closing");
     const m = this.store.get<Member>("member", memberId);
     check(
       !this.store
@@ -126,6 +133,7 @@ export class Core {
       "Member has active execution",
     );
     await this.adapters.get(m.adapterId)?.disconnect?.(m.sessionId);
+    check(!this.closing && !this.stopped, "CLOSED", "Core is closing");
     const value = {
       id: m.sessionId,
       roomId: m.roomId,
@@ -133,6 +141,7 @@ export class Core {
       status: "disconnected",
     };
     this.store.put("connection", value, m.roomId);
+    this.store.event(m.roomId, "connection.changed", value);
     return value;
   }
   answerPermission(id: string, optionId: string | null) {
@@ -167,6 +176,7 @@ export class Core {
   private pumping = false;
   private stopped = false;
   private closing = false;
+  private closePromise?: Promise<void>;
   private cancelInFlight = new Set<string>();
   private cancelDelivered = new Set<string>();
   private lastCancelAttempt = new Map<string, number>();
@@ -178,6 +188,17 @@ export class Core {
       this.adapters.set(a.id, a);
     }
     this.store.transaction(() => {
+      for (const connection of this.store.list<{
+        id: string;
+        roomId: string;
+        status: string;
+      }>("connection")) {
+        if (["connecting", "connected"].includes(connection.status)) {
+          connection.status = "unknown";
+          this.store.put("connection", connection, connection.roomId);
+          this.store.event(connection.roomId, "connection.changed", connection);
+        }
+      }
       for (const run of this.store.list<Run>("run"))
         if (active(run)) {
           run.status = "unknown";
@@ -195,7 +216,11 @@ export class Core {
     });
   }
   start() {
-    check(!this.stopped, "CLOSED", "Core closed");
+    check(
+      !this.stopped && !this.closing,
+      "CLOSED",
+      "Core is closing or closed",
+    );
     if (!this.timer) {
       this.timer = setInterval(() => {
         this.expirePeers();
@@ -1187,6 +1212,10 @@ export class Core {
     return state;
   }
   async close() {
+    this.closePromise ??= this.closeOnce();
+    return this.closePromise;
+  }
+  private async closeOnce() {
     if (this.stopped) return;
     this.closing = true;
     clearInterval(this.timer);

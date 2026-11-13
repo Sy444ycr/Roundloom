@@ -6,6 +6,7 @@ import {
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { StructuredCliAdapter } from "./structured-cli.js";
 import type {
   Adapter,
@@ -19,7 +20,7 @@ interface Connection {
   rpc: ClientConnection;
   cwd: string;
   nativeSession?: string;
-  capabilities: unknown;
+  capabilities: { loadSession?: boolean };
   authMethods: unknown;
   active?: {
     run: Run;
@@ -31,16 +32,50 @@ interface Connection {
 export class AcpAdapter implements Adapter {
   readonly id = "acp";
   readonly simulated = false;
-  readonly capabilities = { cancel: true, resume: false, peerMessaging: false };
+  readonly capabilities = { cancel: true, resume: true, peerMessaging: false };
+  private disposed = false;
+  private connecting = new Map<
+    string,
+    Promise<{ capabilities: { loadSession?: boolean }; authMethods: unknown }>
+  >();
+  private starting = new Map<string, AbortController>();
+  private closingConnections = new WeakMap<Connection, Promise<void>>();
   private connections = new Map<string, Connection>();
   private states = new Map<
     string,
     "succeeded" | "failed" | "cancelled" | "unknown"
   >();
   validateConfig(config: Record<string, unknown>) {
-    return new StructuredCliAdapter().validateConfig(config);
+    const { timeoutMs, resumeSessions, ...processConfig } = z
+      .object({
+        executable: z.string(),
+        args: z.array(z.string()).optional(),
+        cwd: z.string(),
+        timeoutMs: z.number().int().min(1000).max(600000).default(120000),
+        resumeSessions: z.boolean().default(true),
+      })
+      .strict()
+      .parse(config);
+    return {
+      ...new StructuredCliAdapter().validateConfig(processConfig),
+      timeoutMs,
+      resumeSessions,
+    };
   }
   async connect(sessionId: string, value: Record<string, unknown>) {
+    if (this.disposed) throw new CoreError("CLOSED", "Adapter disposed");
+    const pending = this.connecting.get(sessionId);
+    if (pending) return pending;
+    const promise = this.connectOnce(sessionId, value);
+    this.connecting.set(sessionId, promise);
+    try {
+      return await promise;
+    } finally {
+      if (this.connecting.get(sessionId) === promise)
+        this.connecting.delete(sessionId);
+    }
+  }
+  private async connectOnce(sessionId: string, value: Record<string, unknown>) {
     const existing = this.connections.get(sessionId);
     if (existing)
       return {
@@ -100,10 +135,12 @@ export class AcpAdapter implements Adapter {
       capabilities: {},
       authMethods: [],
     };
+    this.connections.set(sessionId, connection);
     child.on("error", () => rpc.close());
     child.on("close", () => {
       rpc.close();
-      this.connections.delete(sessionId);
+      if (this.connections.get(sessionId) === connection)
+        this.connections.delete(sessionId);
     });
     try {
       const init = await rpc.agent.request(
@@ -123,16 +160,21 @@ export class AcpAdapter implements Adapter {
       );
       if (init.protocolVersion !== 1)
         throw new CoreError("CONTRACT_MISMATCH", "ACP v1 required");
-      connection.capabilities = init.agentCapabilities;
+      if (this.disposed || this.connections.get(sessionId) !== connection)
+        throw new CoreError(
+          "CLOSED",
+          "Connection closed during initialization",
+        );
+      connection.capabilities = init.agentCapabilities ?? {};
       connection.authMethods = init.authMethods ?? [];
-      this.connections.set(sessionId, connection);
       return {
         capabilities: connection.capabilities,
         authMethods: connection.authMethods,
       };
     } catch (e) {
-      rpc.close();
-      child.kill();
+      if (this.connections.get(sessionId) === connection)
+        this.connections.delete(sessionId);
+      await this.closeConnection(connection);
       throw e;
     }
   }
@@ -149,65 +191,142 @@ export class AcpAdapter implements Adapter {
     );
   }
   async start(run: Run, emit: (e: AdapterEvent) => void, tools: RunTools) {
-    await this.connect(run.sessionId, run.config);
-    const c = this.connections.get(run.sessionId)!;
-    if (c.active) throw new CoreError("CONFLICT", "Session already active");
-    if (!c.nativeSession) {
-      const session = await c.rpc.agent.request(
-        "session/new",
-        { cwd: c.cwd, mcpServers: [] },
-        {
-          stopWaitingOnCancel: true,
-          cancellationSignal: AbortSignal.timeout(30_000),
-        },
-      );
-      c.nativeSession = session.sessionId;
-    }
-    c.active = { run, emit, tools, text: "" };
-    this.states.set(run.id, "unknown");
-    void c.rpc.agent
-      .request("session/prompt", {
-        sessionId: c.nativeSession,
-        prompt: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              input: run.input,
-              context: run.contextManifest,
-            }),
-          },
-        ],
-      })
-      .then((result) => {
-        const a = c.active;
-        if (!a || a.run.id !== run.id) return;
-        const state =
-          result.stopReason === "cancelled"
-            ? "cancelled"
-            : result.stopReason === "end_turn"
-              ? "succeeded"
-              : "failed";
-        if (state === "succeeded" && a.text) {
-          if (run.purpose === "peer" && run.peerRequestId)
-            a.tools.replyPeer(run.peerRequestId, a.text);
-          else if (run.taskId)
-            emit({ id: randomUUID(), type: "result", content: a.text });
+    if (this.disposed) throw new CoreError("CLOSED", "Adapter disposed");
+    const config = this.validateConfig(run.config);
+    const controller = new AbortController();
+    this.starting.set(run.id, controller);
+    const checkStartup = () => {
+      if (this.disposed || controller.signal.aborted)
+        throw new CoreError("CLOSED", "Run startup cancelled");
+    };
+    try {
+      await this.connect(run.sessionId, run.config);
+      checkStartup();
+      const c = this.connections.get(run.sessionId);
+      if (!c) throw new CoreError("CLOSED", "Connection closed");
+      if (c.active) throw new CoreError("CONFLICT", "Session already active");
+      c.active = { run, emit, tools, text: "" };
+      try {
+        if (!c.nativeSession) {
+          if (run.nativeRef && config.resumeSessions) {
+            if (!c.capabilities.loadSession)
+              throw new CoreError(
+                "CAPABILITY_UNSUPPORTED",
+                "Agent does not support session/load; create a new member or disable resumeSessions explicitly",
+              );
+            await c.rpc.agent.request(
+              "session/load",
+              { sessionId: run.nativeRef, cwd: c.cwd, mcpServers: [] },
+              {
+                stopWaitingOnCancel: true,
+                cancellationSignal: AbortSignal.any([
+                  controller.signal,
+                  AbortSignal.timeout(30_000),
+                ]),
+              },
+            );
+            c.nativeSession = run.nativeRef;
+          } else {
+            const session = await c.rpc.agent.request(
+              "session/new",
+              { cwd: c.cwd, mcpServers: [] },
+              {
+                stopWaitingOnCancel: true,
+                cancellationSignal: AbortSignal.any([
+                  controller.signal,
+                  AbortSignal.timeout(30_000),
+                ]),
+              },
+            );
+            c.nativeSession = session.sessionId;
+          }
         }
-        this.states.set(run.id, state);
-        emit({ id: randomUUID(), type: "state", state });
-      })
-      .catch(() => {
+        checkStartup();
+        emit({ id: randomUUID(), type: "session", nativeRef: c.nativeSession });
         this.states.set(run.id, "unknown");
-        emit({ id: randomUUID(), type: "state", state: "unknown" });
-      })
-      .finally(() => {
-        c.active = undefined;
-      });
-    return { nativeRef: c.nativeSession };
+        const timeout = AbortSignal.timeout(config.timeoutMs);
+        void c.rpc.agent
+          .request(
+            "session/prompt",
+            {
+              sessionId: c.nativeSession,
+              prompt: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    input: run.input,
+                    context: run.contextManifest,
+                  }),
+                },
+              ],
+            },
+            { stopWaitingOnCancel: true, cancellationSignal: timeout },
+          )
+          .then((result) => {
+            const a = c.active;
+            if (!a || a.run.id !== run.id) return;
+            const state =
+              result.stopReason === "cancelled"
+                ? "cancelled"
+                : result.stopReason === "end_turn"
+                  ? "succeeded"
+                  : "failed";
+            if (state === "succeeded" && a.text) {
+              if (run.purpose === "peer" && run.peerRequestId)
+                a.tools.replyPeer(run.peerRequestId, a.text);
+              else if (run.taskId)
+                emit({ id: randomUUID(), type: "result", content: a.text });
+            }
+            this.states.set(run.id, state);
+            emit({ id: randomUUID(), type: "state", state });
+          })
+          .catch(async () => {
+            // A timed out prompt may still be running remotely; discard its transport.
+            if (this.connections.get(run.sessionId) === c)
+              this.connections.delete(run.sessionId);
+            c.active = undefined;
+            await this.closeConnection(c);
+            this.states.set(run.id, "unknown");
+            emit({
+              id: randomUUID(),
+              type: "state",
+              state: "unknown",
+              reason: timeout.aborted
+                ? "provider_timeout"
+                : "provider_connection_failed",
+            });
+          })
+          .finally(() => {
+            if (c.active?.run.id === run.id) c.active = undefined;
+          });
+        return { nativeRef: c.nativeSession };
+      } catch (error) {
+        if (c.active?.run.id === run.id) c.active = undefined;
+        // A cancelled/timed out session/new or load has unknown remote side effects.
+        if (this.connections.get(run.sessionId) === c)
+          this.connections.delete(run.sessionId);
+        await this.closeConnection(c);
+        throw error;
+      }
+    } catch (error) {
+      if (controller.signal.aborted && !this.disposed) {
+        this.states.set(run.id, "cancelled");
+        emit({ id: randomUUID(), type: "state", state: "cancelled" });
+        return { nativeRef: "" };
+      }
+      throw error;
+    } finally {
+      this.starting.delete(run.id);
+    }
   }
   async cancel(run: Run): Promise<"requested" | "unknown"> {
+    const starting = this.starting.get(run.id);
+    if (starting) {
+      starting.abort();
+      return "requested";
+    }
     const c = this.connections.get(run.sessionId);
-    if (!c?.nativeSession) return "unknown";
+    if (!c?.nativeSession || c.active?.run.id !== run.id) return "unknown";
     await c.rpc.agent.notify("session/cancel", { sessionId: c.nativeSession });
     return "requested";
   }
@@ -218,6 +337,13 @@ export class AcpAdapter implements Adapter {
     const c = this.connections.get(sessionId);
     if (c) {
       this.connections.delete(sessionId);
+      await this.closeConnection(c);
+    }
+  }
+  private closeConnection(c: Connection): Promise<void> {
+    const prior = this.closingConnections.get(c);
+    if (prior) return prior;
+    const closing = (async () => {
       c.rpc.close();
       if (c.child.exitCode === null && c.child.signalCode === null) {
         await new Promise<void>((resolve) => {
@@ -237,11 +363,16 @@ export class AcpAdapter implements Adapter {
           else c.child.kill();
         });
       }
-    }
+    })();
+    this.closingConnections.set(c, closing);
+    return closing;
   }
   async dispose() {
+    this.disposed = true;
+    for (const controller of this.starting.values()) controller.abort();
     await Promise.all(
       [...this.connections.keys()].map((id) => this.disconnect(id)),
     );
+    await Promise.allSettled([...this.connecting.values()]);
   }
 }

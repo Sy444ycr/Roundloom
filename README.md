@@ -47,6 +47,7 @@ React 界面 → 受限 IPC → Electron Main → 独立 Core → Agent 适配�
 - [后端调用说明](docs/13-backend-implementation.md)
 - [当前交付与验证边界](docs/14-backend-delivery.md)
 - [原生 Agent 接入与实测](docs/15-native-agent-integration.md)
+- [后端恢复与生命周期加固](docs/16-backend-hardening.md)
 - [里程碑与验收](docs/04-milestones-and-acceptance.md)
 - [贡献与分支约定](CONTRIBUTING.md)
 

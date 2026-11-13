@@ -14,6 +14,35 @@ const cmd = (operation: string, payload: unknown) => ({
   operation,
   payload,
 });
+
+test("connection recovery requires a fresh connection and publishes lifecycle changes", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "roundloom-connections-"));
+  let c = new Core(join(dir, "core.db"), [new MockAdapter()]);
+  try {
+    const room = c.execute(cmd("rooms.create", { name: "connections" })) as any;
+    const member = c.execute(
+      cmd("members.add", { roomId: room.id, name: "mock", adapterId: "mock" }),
+    ) as any;
+    await c.connectMember(member.id);
+    assert.equal(c.store.list<any>("connection")[0].status, "connected");
+    const closing = c.close();
+    assert.throws(() => c.start(), { code: "CLOSED" });
+    await Promise.all([closing, c.close()]);
+    c = new Core(join(dir, "core.db"), [new MockAdapter()]);
+    assert.equal(c.store.list<any>("connection")[0].status, "unknown");
+    await c.connectMember(member.id);
+    await c.disconnectMember(member.id);
+    const events = c.execute(
+      cmd("events.read", { roomId: room.id, after: 0 }),
+    ) as any;
+    assert.ok(JSON.stringify(events).includes('"status":"disconnected"'));
+    await c.close();
+    await assert.rejects(c.connectMember(member.id), { code: "CLOSED" });
+  } finally {
+    await c.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 test("one database owner and pruned event cursors require a snapshot", async () => {
   const dir = mkdtempSync(join(tmpdir(), "roundloom-lock-"));
   const c = new Core(join(dir, "core.db"), [new MockAdapter()]);

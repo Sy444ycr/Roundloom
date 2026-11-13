@@ -64,6 +64,7 @@ const schemas = {
     .strict(),
 } as const;
 export class Services {
+  private closing = false;
   readonly workspaces: Workspaces;
   private pending = new Map<
     string,
@@ -84,6 +85,7 @@ export class Services {
     return op in schemas;
   }
   async execute(raw: unknown): Promise<unknown> {
+    if (this.closing) throw new CoreError("CLOSED", "Services are closing");
     const c = z
       .object({
         protocolVersion: z.literal(1),
@@ -112,6 +114,12 @@ export class Services {
       "artifacts.inspect",
     ].includes(c.operation);
     if (read) return this.dispatch(c.operation, p);
+    const existing = this.pending.get(c.requestId);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint)
+        throw new CoreError("CONFLICT", "Request ID reused");
+      return existing.promise;
+    }
     const cached = this.core.store.db
       .prepare("SELECT fingerprint,result FROM requests WHERE request_id=?")
       .get(c.requestId) as { fingerprint: string; result: string } | undefined;
@@ -125,12 +133,6 @@ export class Services {
           "Previous operation interrupted; inspect its records before retrying",
         );
       return parsed;
-    }
-    const existing = this.pending.get(c.requestId);
-    if (existing) {
-      if (existing.fingerprint !== fingerprint)
-        throw new CoreError("CONFLICT", "Request ID reused");
-      return existing.promise;
     }
     this.core.store.db
       .prepare("INSERT INTO requests VALUES (?,?,?)")
@@ -255,6 +257,7 @@ export class Services {
     throw new CoreError("VALIDATION", "Unknown service operation");
   }
   async close() {
+    this.closing = true;
     this.workspaces.dispose();
     await Promise.allSettled([...this.pending.values()].map((p) => p.promise));
   }
