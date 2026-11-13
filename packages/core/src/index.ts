@@ -83,7 +83,28 @@ export class Core {
       capabilities: a.capabilities,
     }));
   }
-  async connectMember(memberId: string) {
+  private memberControls = new Set<string>();
+  private async controlMember<T>(
+    memberId: string,
+    operation: () => Promise<T>,
+  ) {
+    check(!this.closing && !this.stopped, "CLOSED", "Core is closing");
+    check(
+      !this.memberControls.has(memberId),
+      "CONFLICT",
+      "Member connection operation in progress",
+    );
+    this.memberControls.add(memberId);
+    try {
+      return await operation();
+    } finally {
+      this.memberControls.delete(memberId);
+    }
+  }
+  connectMember(memberId: string) {
+    return this.controlMember(memberId, () => this.connectMemberOnce(memberId));
+  }
+  private async connectMemberOnce(memberId: string) {
     check(!this.closing && !this.stopped, "CLOSED", "Core is closing");
     const m = this.store.get<Member>("member", memberId);
     const a = this.adapters.get(m.adapterId)!;
@@ -117,7 +138,12 @@ export class Core {
       );
     }
   }
-  async authenticateMember(memberId: string, methodId: string) {
+  authenticateMember(memberId: string, methodId: string) {
+    return this.controlMember(memberId, () =>
+      this.authenticateMemberOnce(memberId, methodId),
+    );
+  }
+  private async authenticateMemberOnce(memberId: string, methodId: string) {
     check(!this.closing && !this.stopped, "CLOSED", "Core is closing");
     const m = this.store.get<Member>("member", memberId);
     const a = this.adapters.get(m.adapterId)!;
@@ -128,7 +154,12 @@ export class Core {
     );
     return a.authenticate(m.sessionId, methodId);
   }
-  async disconnectMember(memberId: string) {
+  disconnectMember(memberId: string) {
+    return this.controlMember(memberId, () =>
+      this.disconnectMemberOnce(memberId),
+    );
+  }
+  private async disconnectMemberOnce(memberId: string) {
     check(!this.closing && !this.stopped, "CLOSED", "Core is closing");
     const m = this.store.get<Member>("member", memberId);
     check(
@@ -211,7 +242,11 @@ export class Core {
       }
     }
     return records.map((record) => {
-      if (record.status === "connecting") return record;
+      if (
+        record.status === "connecting" ||
+        this.memberControls.has(record.memberId)
+      )
+        return record;
       const member = this.store.get<Member>("member", record.memberId);
       const adapter = this.adapters.get(member.adapterId);
       let health: { state: string; scope: string };
@@ -792,6 +827,7 @@ export class Core {
       for (const { run_id } of pending) {
         if (this.closing || this.stopped) break;
         let r = this.store.get<Run>("run", run_id);
+        if (this.memberControls.has(r.memberId)) continue;
         if (r.status !== "queued" || this.room(r.roomId).paused) continue;
         if (
           r.purpose === "peer" &&

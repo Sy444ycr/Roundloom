@@ -205,11 +205,16 @@ export class Store {
         "ARCHIVED",
         "Restore archived history before modifying it",
       );
-    this.db
+    const result = this.db
       .prepare(
-        "INSERT INTO objects VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+        "INSERT INTO objects VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data WHERE objects.kind=excluded.kind AND objects.room_id=excluded.room_id",
       )
       .run(value.id, kind, roomId, JSON.stringify(value));
+    if (!result.changes)
+      throw new CoreError(
+        "CONFLICT",
+        "Object ID belongs to another kind or room",
+      );
     return value;
   }
   get<T>(kind: Kind, id: string): T {

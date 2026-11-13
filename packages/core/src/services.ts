@@ -79,6 +79,8 @@ const schemas = {
 } as const;
 export class Services {
   private closing = false;
+  private active = new Set<Promise<unknown>>();
+  private closePromise?: Promise<void>;
   readonly workspaces: Workspaces;
   private pending = new Map<
     string,
@@ -98,7 +100,18 @@ export class Services {
   supports(op: string) {
     return op in schemas;
   }
-  async execute(raw: unknown): Promise<unknown> {
+  execute(raw: unknown): Promise<unknown> {
+    if (this.closing)
+      return Promise.reject(new CoreError("CLOSED", "Services are closing"));
+    const promise = this.executeOnce(raw);
+    this.active.add(promise);
+    void promise.then(
+      () => this.active.delete(promise),
+      () => this.active.delete(promise),
+    );
+    return promise;
+  }
+  private async executeOnce(raw: unknown): Promise<unknown> {
     if (this.closing) throw new CoreError("CLOSED", "Services are closing");
     const c = z
       .object({
@@ -237,7 +250,7 @@ export class Services {
       case "workspaces.write":
         return this.workspaces.write(p.workspaceId, p.path, p.content);
       case "workspaces.snapshot":
-        return this.workspaces.snapshot(p.workspaceId);
+        return this.workspaces.stableSnapshot(p.workspaceId);
       case "tests.execute": {
         const release = this.core.holdTask(p.taskId);
         try {
@@ -295,6 +308,7 @@ export class Services {
   async close() {
     this.closing = true;
     this.workspaces.dispose();
-    await Promise.allSettled([...this.pending.values()].map((p) => p.promise));
+    this.closePromise ??= Promise.allSettled([...this.active]).then(() => {});
+    await this.closePromise;
   }
 }

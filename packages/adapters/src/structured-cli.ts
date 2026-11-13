@@ -9,7 +9,7 @@ import type {
   AdapterEvent,
   RunTools,
 } from "../../adapter-sdk/src/index.js";
-import type { Run } from "../../contracts/src/index.js";
+import { CoreError, type Run } from "../../contracts/src/index.js";
 const configSchema = z
   .object({
     executable: z.string().min(1),
@@ -61,6 +61,7 @@ export class StructuredCliAdapter implements Adapter {
   readonly simulated = false;
   readonly capabilities = { cancel: true, resume: false, peerMessaging: true };
   private handles = new Map<string, Handle>();
+  private disposed = false;
   validateConfig(value: Record<string, unknown>) {
     const c = configSchema.parse(value);
     if (!isAbsolute(c.executable) || !isAbsolute(c.cwd))
@@ -72,6 +73,7 @@ export class StructuredCliAdapter implements Adapter {
     return c;
   }
   async start(run: Run, emit: (event: AdapterEvent) => void, tools: RunTools) {
+    if (this.disposed) throw new CoreError("CLOSED", "Adapter disposed");
     const config = this.validateConfig(run.config);
     // Deliberately omit arbitrary environment injection and shell command evaluation.
     const env = Object.fromEntries(
@@ -98,7 +100,7 @@ export class StructuredCliAdapter implements Adapter {
     });
     const handle: Handle = { child, terminal: false, state: "unknown" };
     this.handles.set(run.id, handle);
-    const finish = (state: "succeeded" | "failed" | "cancelled") => {
+    const finish = (state: Handle["state"]) => {
       if (handle.terminal) return;
       handle.terminal = true;
       handle.state = state;
@@ -116,7 +118,7 @@ export class StructuredCliAdapter implements Adapter {
     child.stdout.on("data", (chunk: Buffer) => {
       bufferedBytes += chunk.length;
       if (bufferedBytes > 2_000_000 && !handle.terminal) {
-        finish("failed");
+        finish("unknown");
         child.kill();
       }
     });
@@ -167,14 +169,15 @@ export class StructuredCliAdapter implements Adapter {
         }
         child.stdin.write(JSON.stringify(reply) + "\n");
       } catch {
-        finish("failed");
+        finish("unknown");
         child.kill();
       }
     });
-    child.on("error", () => finish("failed"));
+    child.on("error", () => finish(child.pid ? "unknown" : "failed"));
     child.on("close", () => {
       lines.close();
-      if (!handle.terminal) finish("failed");
+      if (!handle.terminal) finish("unknown");
+      this.handles.delete(run.id);
     });
     child.stdin.write(
       JSON.stringify({
@@ -203,6 +206,7 @@ export class StructuredCliAdapter implements Adapter {
     return this.handles.get(run.id)?.state ?? "unknown";
   }
   dispose() {
+    this.disposed = true;
     for (const h of this.handles.values()) {
       h.terminal = true;
       h.child.kill();

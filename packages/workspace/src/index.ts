@@ -8,8 +8,9 @@ import {
   mkdir,
   writeFile,
   rename,
+  rm,
 } from "node:fs/promises";
-import { resolve, relative, isAbsolute, join, dirname } from "node:path";
+import { resolve, relative, isAbsolute, join, dirname, sep } from "node:path";
 import { Store } from "../../storage/src/index.js";
 import {
   CoreError,
@@ -108,6 +109,30 @@ export async function runCommand(
 export class Workspaces {
   private running = new Map<string, AbortController>();
   private locked = new Set<string>();
+  private lock(root: string) {
+    const contains = (parent: string, child: string) => {
+      const path = relative(parent, child);
+      return !isAbsolute(path) && path !== ".." && !path.startsWith(".." + sep);
+    };
+    check(
+      ![...this.locked].some(
+        (other) => contains(root, other) || contains(other, root),
+      ),
+      "CONFLICT",
+      "Workspace overlaps an active file operation",
+    );
+    this.locked.add(root);
+    return () => this.locked.delete(root);
+  }
+  async stableSnapshot(workspaceId: string) {
+    const w = this.store.get<Workspace>("workspace", workspaceId);
+    const release = this.lock(w.root);
+    try {
+      return await this.snapshot(workspaceId);
+    } finally {
+      release();
+    }
+  }
   constructor(private store: Store) {
     for (const e of store.list<Evidence>("evidence"))
       if (e.status === "running") {
@@ -231,22 +256,28 @@ export class Workspaces {
   }
   async write(workspaceId: string, path: string, content: string) {
     const w = this.store.get<Workspace>("workspace", workspaceId);
-    const target = resolve(w.root, path);
-    const parent = await this.path(
-      workspaceId,
-      relative(w.root, dirname(target)),
-    );
-    check(parent !== target, "VALIDATION", "Invalid target");
+    const release = this.lock(w.root);
+    let temporary: string | undefined;
     try {
-      await this.path(workspaceId, path);
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      const target = resolve(w.root, path);
+      const parent = await this.path(
+        workspaceId,
+        relative(w.root, dirname(target)),
+      );
+      check(parent !== target, "VALIDATION", "Invalid target");
+      try {
+        await this.path(workspaceId, path);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      }
+      temporary = join(parent, ".roundloom-" + randomUUID());
+      await writeFile(temporary, content, { flag: "wx" });
+      await rename(temporary, target);
+      return await this.snapshot(w.id);
+    } finally {
+      if (temporary) await rm(temporary, { force: true }).catch(() => {});
+      release();
     }
-    check(!this.locked.has(w.id), "CONFLICT", "Workspace is being tested");
-    const temporary = join(parent, ".roundloom-" + randomUUID());
-    await writeFile(temporary, content, { flag: "wx" });
-    await rename(temporary, target);
-    return this.snapshot(w.id);
   }
   async capture(taskId: string, workspaceId: string, expectedVersion: number) {
     check(
@@ -275,7 +306,7 @@ export class Workspaces {
       "CONFLICT",
       "Finish execution before capturing",
     );
-    const snapshot = await this.snapshot(workspaceId);
+    const snapshot = await this.stableSnapshot(workspaceId);
     check(
       this.store.get<Task>("task", taskId).version === expectedVersion,
       "CONFLICT",
@@ -317,7 +348,7 @@ export class Workspaces {
   async inspect(artifactId: string) {
     const a = this.store.get<any>("artifact", artifactId);
     if (!a.workspaceId) return a;
-    const snapshot = await this.snapshot(a.workspaceId);
+    const snapshot = await this.stableSnapshot(a.workspaceId);
     const task = this.store.get<Task>("task", a.taskId);
     const evidence = this.store
       .historyForTask<Evidence>("evidence", a.taskId)
@@ -361,7 +392,6 @@ export class Workspaces {
       "FORBIDDEN",
       "Workspace belongs to another room",
     );
-    check(!this.locked.has(w.id), "CONFLICT", "Workspace already being tested");
     check(
       !this.store
         .list<Run>("run", t.roomId)
@@ -373,7 +403,7 @@ export class Workspaces {
       "CONFLICT",
       "Finish agent execution before testing",
     );
-    this.locked.add(w.id);
+    const release = this.lock(w.root);
     const id = randomUUID();
     const controller = new AbortController();
     this.running.set(id, controller);
@@ -437,7 +467,7 @@ export class Workspaces {
       throw error;
     } finally {
       this.running.delete(id);
-      this.locked.delete(w.id);
+      release();
     }
   }
   cancel(id: string) {
