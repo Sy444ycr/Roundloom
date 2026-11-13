@@ -53,6 +53,7 @@ React 界面 → 受限 IPC → Electron Main → 独立 Core → Agent 适配�
 - [当前后端复查与剩余工作](docs/19-backend-audit-and-evidence-lifecycle.md)
 - [连接健康探测与历史归档](docs/20-connection-health-and-history.md)
 - [后端并发与异常状态复查](docs/21-backend-concurrency-audit.md)
+- [并发修复后一小时负载复测](docs/22-post-audit-hour-soak.md)
 - [里程碑与验收](docs/04-milestones-and-acceptance.md)
 - [贡献与分支约定](CONTRIBUTING.md)
 
