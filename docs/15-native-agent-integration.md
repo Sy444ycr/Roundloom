@@ -24,7 +24,7 @@ cwd 必须是现有目录。可选 model 指定模型，executable 指定真实�
 
 Claude 注入 roundloom MCP 服务，提供 members、peer_request、peer_reply。工具绑定当前运行身份，Core 校验房间、任务与回复范围。内部协作工具自动允许，其余需要 SDK 请求授权的调用转为 permission interaction；SDK 自身的自动允许规则仍由原生运行时控制。
 
-Codex 使用 approvalPolicy=never、禁用网络及 webSearch，默认只读沙箱。Codex 和 ACP 的 peerMessaging=false，不能主动调用同伴求助工具，但适配器会把成功结束的、明确关联 peerRequestId 的最终回答交回请求者。Core 仍校验运行身份、房间和接收者；普通输出不会自动触发回复或新任务。Claude 则通过显式 MCP 工具发起和回复求助。
+Codex 使用 approvalPolicy=never、禁用网络及 webSearch，默认只读沙箱。后续已增加 Codex 的显式 MCP 同伴工具，见 [主动求助与负载验证](17-codex-peer-and-soak.md)。ACP 仍不提供主动求助工具，只把明确关联 peerRequestId 的成功最终回答交回请求者；Core 校验运行身份、房间和接收者。
 
 ## 验证
 
@@ -49,6 +49,6 @@ node dist/scripts/live-collaboration.js PATH_TO_CLAUDE_EXE PATH_TO_OPENCODE_EXE 
 
 脚本只输出状态与校验结果，不输出认证信息。编码脚本只批准目标临时文件的 Write 请求；通过后在 .roundloom/live-evidence 下保存生成代码、SQLite 快照和包含命令、退出码、摘要及产物的报告，默认不提交 Git。测试数据中的原始工作区路径随清理失效，证据用于审计，不能直接当作仍可编辑的工作区恢复。
 
-当前可用于桌面前端对接的后端预览。ACP 原生跨进程恢复及后续可靠性补充见 [后端加固记录](16-backend-hardening.md)。Codex 主动同伴工具、更多厂商与复杂真实工程场景仍需扩展；桌面界面与安装包另行交付。
+当前可用于桌面前端对接的后端预览。ACP 原生跨进程恢复见 [后端加固记录](16-backend-hardening.md)，Codex 主动同伴工具见 [主动求助与负载验证](17-codex-peer-and-soak.md)。更多厂商与复杂真实工程场景仍需扩展；桌面界面与安装包另行交付。
 
 参考：[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/typescript)、[Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)。

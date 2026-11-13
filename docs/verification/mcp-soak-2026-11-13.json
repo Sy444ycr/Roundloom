@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "cycles": 1000,
+  "completed": 1000,
+  "requests": 1000,
+  "concurrency": 8,
+  "elapsedSeconds": 6.679,
+  "heapGrowthMiB": 6.706535339355469,
+  "remainingServerHandles": 0,
+  "gcAvailable": true
+}

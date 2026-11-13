@@ -20,6 +20,7 @@ import type {
   RunTools,
 } from "../../adapter-sdk/src/index.js";
 import { CoreError, type Run } from "../../contracts/src/index.js";
+import { openPeerMcp } from "./peer-mcp.js";
 const schema = z
   .object({
     cwd: z.string().min(1),
@@ -65,7 +66,7 @@ export class NativeAdapter implements Adapter {
     this.capabilities = {
       cancel: true,
       resume: true,
-      peerMessaging: id === "claude",
+      peerMessaging: true,
     };
   }
   validateConfig(value: Record<string, unknown>) {
@@ -108,9 +109,7 @@ export class NativeAdapter implements Adapter {
           ? {
               requestId: run.peerRequestId,
               instruction:
-                this.id === "claude"
-                  ? "Use peer_reply to answer the request, then end your turn."
-                  : "Return your answer as your final response. The platform routes it to the requester.",
+                "Use peer_reply to answer the request, then end your turn.",
             }
           : {
               instruction:
@@ -121,10 +120,35 @@ export class NativeAdapter implements Adapter {
       let outcome: State = "unknown";
       let reason: string | undefined;
       let result = "";
+      let peerMcp: Awaited<ReturnType<typeof openPeerMcp>> | undefined;
       try {
         if (this.id === "codex") {
+          peerMcp = await openPeerMcp(tools, controller.signal);
+          if (controller.signal.aborted)
+            throw new Error("Cancelled before submission");
           const client = this.codexFactory({
             codexPathOverride: config.executable,
+            config: {
+              mcp_servers: {
+                roundloom: {
+                  url: peerMcp.url,
+                  bearer_token_env_var: "ROUNDLOOM_PEER_TOKEN",
+                  required: true,
+                  enabled: true,
+                  default_tools_approval_mode: "approve",
+                  enabled_tools: ["members", "peer_request", "peer_reply"],
+                },
+              },
+            },
+            env: {
+              ...Object.fromEntries(
+                Object.entries(process.env).filter(
+                  (entry): entry is [string, string] =>
+                    typeof entry[1] === "string",
+                ),
+              ),
+              ROUNDLOOM_PEER_TOKEN: peerMcp.token,
+            },
           });
           const options: ThreadOptions = {
             workingDirectory: config.cwd,
@@ -262,18 +286,13 @@ export class NativeAdapter implements Adapter {
           }
         }
         if (outcome === "succeeded" && result && run.taskId) {
-          if (
-            run.purpose === "peer" &&
-            run.peerRequestId &&
-            this.id === "codex"
-          )
-            tools.replyPeer(run.peerRequestId, result);
-          else if (run.purpose !== "peer")
+          if (run.purpose !== "peer")
             send({ id: randomUUID(), type: "result", content: result });
         }
       } catch {
         outcome = controller.signal.aborted ? "cancelled" : "unknown";
       } finally {
+        await peerMcp?.close();
         clearTimeout(timer);
         if (timedOut) {
           outcome = "unknown";
