@@ -2,8 +2,8 @@
 
 > 2026-11-13 更新：首发形态已确定为桌面应用。本文涉及本地 Web 首发的内容为历史候选，桌面进程、通信和生命周期以[桌面架构选型](09-desktop-architecture.md)为当前推荐；其余业务语义继续有效。
 
-版本：v0.1 评审稿  
-日期：2026-11-13  
+版本：v0.1 评审稿
+日期：2026-11-13
 适用范围：群聊式多 Agent 协作工具的建议架构，不代表已有实现
 
 ## 1. 架构目标
@@ -119,4 +119,3 @@ Agent 宣称完成后，任务可以进入待验收状态。验收结论来自�
 接入设计参考官方协议：ACP 提供客户端与编程 Agent 的交互、版本和能力协商；A2A 描述独立 Agent 的消息、任务与产物；MCP 可为成员提供群聊工具。具体规范边界见[Agent 接入规范](03-agent-integration.md)及 [ACP 协议关系说明](https://agentclientprotocol.com/get-started/related-protocols)、[A2A 核心概念](https://a2a-protocol.org/latest/topics/key-concepts/)。资料查阅日期：2026-11-13。
 
 本阶段不固定完整数据库表、HTTP 路径或框架目录。确认对象与状态后，再在实施阶段将它们细化为可版本化的数据结构和接口定义。
-

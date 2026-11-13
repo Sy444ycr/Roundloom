@@ -59,4 +59,3 @@ Renderer 启用 contextIsolation 和 sandbox，关闭 nodeIntegration；校验 I
 ## 7. 后续详细设计
 
 进程职责、建议代码目录、IPC 与退出恢复见[桌面实施设计](10-desktop-implementation-design.md)；接入操作、事件和工具身份见[适配器接口](11-adapter-contract.md)。这两份文档细化本方案，不改变业务状态机和已确认决策。
-

@@ -8,9 +8,9 @@
 
 已实现任务与消息、SQLite 持久化、调度、取消、求助、版本化产物、人工验收和事件订阅。提供 mock 及 Roundloom JSONL CLI 桥接；没有声称任何商业 Agent 已验证兼容。现已补齐工作区、Git worktree、真实测试证据、审批、备份恢复及 ACP 适配器，并完成 OpenCode 最小真实问答联调。Claude Code/Codex 专用路径和桌面 UI 尚未验证。详见[后端扩展交付记录](14-backend-delivery.md)。
 
-版本：v0.1 评审稿  
-日期：2026-11-13  
-阶段：需求与设计  
+版本：v0.1 评审稿
+日期：2026-11-13
+阶段：需求与设计
 名称状态：Roundloom 已由用户确认
 
 Roundloom 是一个以项目群聊为主界面的多 Agent 协作工具。用户可以添加真实的 Agent 成员，在群里讨论、分配任务、补充要求和检查结果；Agent 可以在授权的群聊范围内向同伴提问、交接工作，并提交代码修改与实际测试记录。
@@ -89,6 +89,3 @@ Roundloom 是一个以项目群聊为主界面的多 Agent 协作工具。用户
 ## 实施工具与 M1 计划
 
 [实施工具选型与 M1 计划](12-toolchain-and-m1-plan.md)收敛了 TypeScript、SQLite/better-sqlite3、Electron Forge + Vite、npm workspaces 和 Windows 原生优先的建议，包含九个工作包、打包验证、验收出口与未决项。它细化 C-11，不代表工具兼容已经实测或已开始编码。
-
-
-
