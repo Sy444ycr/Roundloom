@@ -187,8 +187,12 @@ export class AcpAdapter implements Adapter {
             : result.stopReason === "end_turn"
               ? "succeeded"
               : "failed";
-        if (state === "succeeded" && a.text && run.taskId)
-          emit({ id: randomUUID(), type: "result", content: a.text });
+        if (state === "succeeded" && a.text) {
+          if (run.purpose === "peer" && run.peerRequestId)
+            a.tools.replyPeer(run.peerRequestId, a.text);
+          else if (run.taskId)
+            emit({ id: randomUUID(), type: "result", content: a.text });
+        }
         this.states.set(run.id, state);
         emit({ id: randomUUID(), type: "state", state });
       })
@@ -213,12 +217,31 @@ export class AcpAdapter implements Adapter {
   async disconnect(sessionId: string) {
     const c = this.connections.get(sessionId);
     if (c) {
-      c.rpc.close();
-      c.child.kill();
       this.connections.delete(sessionId);
+      c.rpc.close();
+      if (c.child.exitCode === null && c.child.signalCode === null) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(done, 5000);
+          function done() {
+            clearTimeout(timer);
+            c!.child.off("exit", done);
+            resolve();
+          }
+          c.child.once("exit", done);
+          if (process.platform === "win32" && c.child.pid)
+            spawn("taskkill", ["/PID", String(c.child.pid), "/T", "/F"], {
+              windowsHide: true,
+              stdio: "ignore",
+              shell: false,
+            }).on("error", () => c.child.kill());
+          else c.child.kill();
+        });
+      }
     }
   }
-  dispose() {
-    for (const id of this.connections.keys()) void this.disconnect(id);
+  async dispose() {
+    await Promise.all(
+      [...this.connections.keys()].map((id) => this.disconnect(id)),
+    );
   }
 }

@@ -10,9 +10,9 @@
 - SQLite 数据存储、事件订阅、幂等请求及版本化验收。
 - 工作区与 Git worktree、真实命令执行、测试证据和文件产物核验。
 - 权限交互、备份恢复、事件保留和数据库单实例保护。
-- Mock、JSONL CLI 桥接及 ACP v1 适配器。
+- Mock、JSONL CLI 桥接、ACP v1 及 Claude/Codex 原生 SDK 适配器。
 
-OpenCode 1.18.14 已验证 ACP 握手和一次真实问答。Claude Code、Codex 的专用接入尚未验证；不宣称全部 Agent 兼容。真实模型调用不属于默认 CI。
+OpenCode 已验证 ACP 接入；Claude Code、Codex 均通过真实两轮问答及后端重启续接。Claude → OpenCode 求助 → Claude 续跑写文件 → 独立测试 → 文件产物核验已跑通，测试通过后仍须用户验收。真实模型调用不属于默认 CI，兼容结论仅覆盖已记录的环境与场景。
 
 ## 快速开始
 
@@ -46,6 +46,7 @@ React 界面 → 受限 IPC → Electron Main → 独立 Core → Agent 适配�
 - [适配器契约](docs/11-adapter-contract.md)
 - [后端调用说明](docs/13-backend-implementation.md)
 - [当前交付与验证边界](docs/14-backend-delivery.md)
+- [原生 Agent 接入与实测](docs/15-native-agent-integration.md)
 - [里程碑与验收](docs/04-milestones-and-acceptance.md)
 - [贡献与分支约定](CONTRIBUTING.md)
 

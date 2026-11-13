@@ -1,5 +1,6 @@
 import type { Run } from "../../contracts/src/index.js";
 export type AdapterEvent = { id: string } & (
+  | { type: "session"; nativeRef: string }
   | { type: "output"; text: string }
   | { type: "result"; content: string }
   | {
@@ -9,6 +10,7 @@ export type AdapterEvent = { id: string } & (
     }
 );
 export interface RunTools {
+  listMembers(): { id: string; name: string }[];
   requestPermission(
     title: string,
     options: { id: string; label: string }[],
@@ -36,7 +38,7 @@ export interface Adapter {
   ): Promise<{ nativeRef: string }>;
   cancel(run: Run): Promise<"requested" | "unsupported" | "unknown">;
   query(run: Run): Promise<"succeeded" | "failed" | "cancelled" | "unknown">;
-  dispose?(): void;
+  dispose?(): void | Promise<void>;
   connect?(
     sessionId: string,
     config: Record<string, unknown>,

@@ -230,7 +230,11 @@ export class Core {
         roomId: r.roomId,
         memberId: r.memberId,
         adapterId: r.adapterId,
-        nativeRef: r.nativeRef,
+        nativeRef:
+          r.nativeRef ||
+          this.store
+            .list<{ id: string; nativeRef?: string }>("session", r.roomId)
+            .find((s) => s.id === r.sessionId)?.nativeRef,
         status: r.status,
         lastRunId: r.id,
       },
@@ -295,6 +299,11 @@ export class Core {
       config: member.config,
       adapterId: member.adapterId,
     };
+    const previous = this.store
+      .list<{ id: string; nativeRef?: string }>("session", member.roomId)
+      .find((s) => s.id === member.sessionId);
+    if (this.adapters.get(member.adapterId)?.capabilities.resume)
+      run.nativeRef = previous?.nativeRef;
     this.saveRun(run);
     this.store.db
       .prepare("INSERT INTO dispatch VALUES (?,?)")
@@ -732,6 +741,10 @@ export class Core {
           }
         }
         this.store.transaction(() => {
+          if (adapter.capabilities.resume && !r.nativeRef)
+            r.nativeRef = this.store
+              .list<{ id: string; nativeRef?: string }>("session", r.roomId)
+              .find((s) => s.id === r.sessionId)?.nativeRef;
           r.status = "starting";
           if (task) {
             r.requirementsVersion = task.requirementsVersion;
@@ -745,6 +758,7 @@ export class Core {
             };
             task.runCount++;
             if (r.purpose === "task") {
+              task.artifactId = undefined;
               task.status = "running";
               task.waitReason = undefined;
             }
@@ -774,7 +788,7 @@ export class Core {
             if (this.stopped) return;
             this.store.transaction(() => {
               const latest = this.store.get<Run>("run", runId);
-              latest.nativeRef = result.nativeRef;
+              if (result.nativeRef) latest.nativeRef = result.nativeRef;
               if (latest.status === "starting") latest.status = "running";
               this.saveRun(latest);
             });
@@ -802,6 +816,12 @@ export class Core {
   }
   private tools(runId: string): RunTools {
     return {
+      listMembers: () => {
+        const r = this.toolRun(runId);
+        return this.store
+          .list<Member>("member", r.roomId)
+          .map((m) => ({ id: m.id, name: m.name }));
+      },
       requestPermission: (title, options) => {
         const r = this.store.get<Run>("run", runId);
         check(active(r), "FORBIDDEN", "Run is not active");
@@ -845,7 +865,7 @@ export class Core {
       replyPeer: (request, text) => this.replyPeer(runId, request, text),
     };
   }
-  private toolRun(runId: string) {
+  private toolRun(runId: string, requiresPeerTools = true) {
     const r = this.store.get<Run>("run", runId);
     check(
       active(r) && r.status !== "unknown",
@@ -853,7 +873,8 @@ export class Core {
       "Run tool scope expired",
     );
     check(
-      this.adapters.get(r.adapterId)?.capabilities.peerMessaging,
+      !requiresPeerTools ||
+        this.adapters.get(r.adapterId)?.capabilities.peerMessaging,
       "CAPABILITY_UNSUPPORTED",
       "No peer tools",
     );
@@ -928,7 +949,7 @@ export class Core {
       "Invalid reply",
     );
     this.store.transaction(() => {
-      const r = this.toolRun(runId);
+      const r = this.toolRun(runId, false);
       const q = this.store.get<PeerRequest>("peer", requestId);
       check(
         q.roomId === r.roomId &&
@@ -996,6 +1017,13 @@ export class Core {
       z
         .object({
           id: z.string().min(1).max(200),
+          type: z.literal("session"),
+          nativeRef: z.string().min(1).max(500),
+        })
+        .strict(),
+      z
+        .object({
+          id: z.string().min(1).max(200),
           type: z.literal("output"),
           text: z.string().max(100_000),
         })
@@ -1031,6 +1059,11 @@ export class Core {
         simulated: this.adapters.get(r.adapterId)?.simulated ?? false,
       });
       if (terminal(r)) return;
+      if (e.type === "session") {
+        r.nativeRef = e.nativeRef;
+        this.saveRun(r);
+        return;
+      }
       if (e.type === "output") {
         this.message(r.roomId, r.memberId, e.text, [], r.taskId);
         return;
@@ -1160,7 +1193,11 @@ export class Core {
     // Disposal only releases adapter resources; it does not claim remote cancellation.
     for (const id of [...this.permissions.keys()])
       this.answerPermission(id, null);
-    for (const a of this.adapters.values()) a.dispose?.();
+    await Promise.allSettled(
+      [...this.adapters.values()].map((a) =>
+        Promise.resolve().then(() => a.dispose?.()),
+      ),
+    );
     this.store.transaction(() => {
       for (const r of this.store.list<Run>("run"))
         if (active(r)) {

@@ -14,12 +14,78 @@ import { Core } from "../packages/core/src/index.js";
 import { Services } from "../packages/core/src/services.js";
 import { MockAdapter } from "../packages/adapters/src/mock.js";
 import { AcpAdapter } from "../packages/adapters/src/acp.js";
-import type { Task, Member, Room } from "../packages/contracts/src/index.js";
+import type {
+  Task,
+  Member,
+  Room,
+  Run,
+  PeerRequest,
+} from "../packages/contracts/src/index.js";
 const cmd = (operation: string, payload: unknown) => ({
   protocolVersion: 1,
   requestId: randomUUID(),
   operation,
   payload,
+});
+
+test("ACP final response answers only its assigned peer request and resumes owner", async () => {
+  const c = new Core(":memory:", [new MockAdapter(), new AcpAdapter()]);
+  try {
+    const room = c.execute(cmd("rooms.create", { name: "Peer" })) as Room;
+    const peer = c.execute(
+      cmd("members.add", {
+        roomId: room.id,
+        name: "ACP",
+        adapterId: "acp",
+        config: {
+          executable: process.execPath,
+          args: [resolve("tests/fixtures/acp-agent.mjs")],
+          cwd: process.cwd(),
+        },
+      }),
+    ) as Member;
+    const owner = c.execute(
+      cmd("members.add", {
+        roomId: room.id,
+        name: "Owner",
+        adapterId: "mock",
+        config: { peerId: peer.id },
+      }),
+    ) as Member;
+    const task = c.execute(
+      cmd("tasks.assign", {
+        roomId: room.id,
+        ownerId: owner.id,
+        goal: "Review",
+        criteria: ["answer"],
+      }),
+    ) as Task;
+    c.start();
+    await until(() =>
+      c.store.list<any>("interaction").some((i) => i.status === "pending"),
+    );
+    const peerRun = c.store.list<Run>("run").find((r) => r.purpose === "peer")!;
+    assert.throws(() => c.requestPeer(peerRun.id, owner.id, "not supported"), {
+      code: "CAPABILITY_UNSUPPORTED",
+    });
+    assert.throws(() => c.replyPeer(peerRun.id, "not-a-request", "forged"));
+    const interaction = c.store
+      .list<any>("interaction")
+      .find((i) => i.status === "pending");
+    c.answerPermission(interaction.id, "allow");
+    await until(() => c.task(task.id).status === "review");
+    const requests = c.store.list<PeerRequest>("peer");
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].reply, "Fixture answer 1");
+    assert.equal(requests[0].resumed, true);
+    assert.equal(c.store.list<Run>("run").length, 3);
+    assert.throws(
+      () => c.replyPeer(peerRun.id, requests[0].id, "late forged reply"),
+      { code: "FORBIDDEN" },
+    );
+  } finally {
+    await c.close();
+  }
 });
 async function until(fn: () => boolean) {
   const deadline = Date.now() + 5000;
