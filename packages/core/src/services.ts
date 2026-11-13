@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { Core } from "./index.js";
+import { Archives } from "./archives.js";
 import { Workspaces } from "../../workspace/src/index.js";
 import {
   CoreError,
@@ -19,6 +20,19 @@ const schemas = {
   "members.disconnect": z.object({ memberId: id }).strict(),
   "members.authenticate": z.object({ memberId: id, methodId: id }).strict(),
   "connections.list": z.object({ roomId: id }).strict(),
+  "connections.check": z.object({ roomId: id }).strict(),
+  "history.archive": z
+    .object({ taskId: id, expectedVersion: z.number().int().positive() })
+    .strict(),
+  "history.list": z
+    .object({
+      roomId: id,
+      limit: z.number().int().min(1).max(100).default(50),
+      offset: z.number().int().nonnegative().default(0),
+    })
+    .strict(),
+  "history.read": z.object({ archiveId: id }).strict(),
+  "history.restore": z.object({ archiveId: id }).strict(),
   "sessions.list": z.object({ roomId: id }).strict(),
   "interactions.list": z.object({ roomId: id }).strict(),
   "interactions.answer": z
@@ -105,6 +119,9 @@ export class Services {
     const read = [
       "adapters.list",
       "connections.list",
+      "connections.check",
+      "history.list",
+      "history.read",
       "sessions.list",
       "interactions.list",
       "workspaces.list",
@@ -179,6 +196,25 @@ export class Services {
         return this.core.authenticateMember(p.memberId, p.methodId);
       case "connections.list":
         return this.core.store.list("connection", p.roomId);
+      case "connections.check":
+        return this.core.checkConnections(p.roomId);
+      case "history.list":
+        return new Archives(this.core.store).list(p.roomId, p.limit, p.offset);
+      case "history.read":
+        return new Archives(this.core.store).read(p.archiveId);
+      case "history.restore":
+        return new Archives(this.core.store).restore(p.archiveId);
+      case "history.archive": {
+        const release = this.core.holdTask(p.taskId);
+        try {
+          return new Archives(this.core.store).create(
+            p.taskId,
+            p.expectedVersion,
+          );
+        } finally {
+          release();
+        }
+      }
       case "sessions.list":
         return this.core.store.list("session", p.roomId);
       case "interactions.list":

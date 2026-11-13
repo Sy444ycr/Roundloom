@@ -84,8 +84,9 @@ export class Store {
         } catch {}
       };
     }
+    let opened: Database.Database | undefined;
     try {
-      this.db = new Database(path);
+      this.db = opened = new Database(path);
       this.db.pragma("foreign_keys = ON");
       this.db.pragma("journal_mode = WAL");
       this.db.pragma("synchronous = FULL");
@@ -93,7 +94,7 @@ export class Store {
       const version = this.db.pragma("user_version", {
         simple: true,
       }) as number;
-      if (version > 1) {
+      if (version > 2) {
         this.db.close();
         throw new CoreError(
           "SCHEMA_TOO_NEW",
@@ -116,10 +117,42 @@ export class Store {
         CREATE INDEX IF NOT EXISTS objects_pending_peer_deadline ON objects(json_extract(data, '$.deadline'))
           WHERE kind='peer' AND json_extract(data, '$.status')='pending';
         CREATE INDEX IF NOT EXISTS dispatch_pending ON dispatch(status) WHERE status='pending';
-        PRAGMA user_version = 1;
+        CREATE TABLE IF NOT EXISTS archives (id TEXT PRIMARY KEY, task_id TEXT NOT NULL UNIQUE, room_id TEXT NOT NULL, archived_at TEXT NOT NULL, metadata TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS archives_room ON archives(room_id, archived_at, id);
+        CREATE TABLE IF NOT EXISTS archived_objects (id TEXT PRIMARY KEY, archive_id TEXT NOT NULL REFERENCES archives(id), kind TEXT NOT NULL, room_id TEXT NOT NULL, data TEXT NOT NULL CHECK(json_valid(data)));
+        CREATE INDEX IF NOT EXISTS archived_objects_batch ON archived_objects(archive_id);
+        PRAGMA user_version = 2;
       `);
+        if (version < 2) {
+          const connections = this.db
+            .prepare(
+              "SELECT id,room_id,data FROM objects WHERE kind='connection'",
+            )
+            .all() as { id: string; room_id: string; data: string }[];
+          for (const row of connections) {
+            const value = JSON.parse(row.data);
+            const id = "connection:" + row.id;
+            this.db.prepare("UPDATE objects SET id=?,data=? WHERE id=?").run(
+              id,
+              JSON.stringify({
+                ...value,
+                id,
+                sessionId: row.id,
+                roomId: row.room_id,
+                memberId: value.memberId,
+                status: "unknown",
+              }),
+              row.id,
+            );
+            if (value.lastRunId)
+              this.db
+                .prepare("INSERT INTO objects VALUES (?,?,?,?)")
+                .run(row.id, "session", row.room_id, row.data);
+          }
+        }
       })();
     } catch (error) {
+      if (opened?.open) opened.close();
       this.unlock();
       throw error;
     }
@@ -167,6 +200,11 @@ export class Store {
     );
   }
   put<T extends { id: string }>(kind: Kind, value: T, roomId: string): T {
+    if (this.isArchived(value.id))
+      throw new CoreError(
+        "ARCHIVED",
+        "Restore archived history before modifying it",
+      );
     this.db
       .prepare(
         "INSERT INTO objects VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
@@ -176,8 +214,10 @@ export class Store {
   }
   get<T>(kind: Kind, id: string): T {
     const row = this.db
-      .prepare("SELECT data FROM objects WHERE kind=? AND id=?")
-      .get(kind, id) as { data: string } | undefined;
+      .prepare(
+        "SELECT data FROM objects WHERE kind=@kind AND id=@id UNION ALL SELECT data FROM archived_objects WHERE kind=@kind AND id=@id",
+      )
+      .get({ kind, id }) as { data: string } | undefined;
     if (!row) throw new CoreError("NOT_FOUND", `${kind} not found`);
     return JSON.parse(row.data) as T;
   }
@@ -194,6 +234,20 @@ export class Store {
             .all(kind, roomId)
     ) as { data: string }[];
     return rows.map((r) => JSON.parse(r.data) as T);
+  }
+  isArchived(id: string): boolean {
+    return !!this.db
+      .prepare("SELECT 1 FROM archived_objects WHERE id=?")
+      .get(id);
+  }
+  historyForTask<T>(kind: Kind, taskId: string): T[] {
+    return this.selectObjects<T>(
+      "SELECT data FROM objects WHERE kind=? AND json_extract(data,'$.taskId')=? UNION ALL SELECT data FROM archived_objects WHERE kind=? AND archive_id=(SELECT id FROM archives WHERE task_id=?)",
+      kind,
+      taskId,
+      kind,
+      taskId,
+    );
   }
   event(roomId: string, type: string, payload: unknown): void {
     this.db

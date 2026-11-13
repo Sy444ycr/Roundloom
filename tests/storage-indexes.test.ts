@@ -101,7 +101,7 @@ test("existing databases gain peer indexes without losing data or changing deadl
     assert.deepEqual(s.expiredPeers(100), [peer]);
     s.put("peer", { ...peer, status: "replied" }, "room");
     assert.equal(s.expiredPeers(101).length, 0);
-    assert.equal(s.db.pragma("user_version", { simple: true }), 1);
+    assert.equal(s.db.pragma("user_version", { simple: true }), 2);
     const plan = s.db
       .prepare(
         "EXPLAIN QUERY PLAN SELECT run_id FROM dispatch WHERE status='pending' ORDER BY rowid",

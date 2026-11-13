@@ -8,7 +8,10 @@ const lines = createInterface({ input: process.stdin });
 lines.on('line', line => {
   const m = JSON.parse(line);
   record(m.method ?? 'response');
-  if(m.method === 'initialize') setTimeout(() => send({id:m.id, result:{protocolVersion:1,agentCapabilities:{loadSession:mode !== 'unsupported'},authMethods:[]}}), 100);
+  if(m.method === 'initialize') setTimeout(() => {
+    send({id:m.id, result:{protocolVersion:1,agentCapabilities:{loadSession:mode !== 'unsupported'},authMethods:[]}});
+    if(mode === 'idle-exit') setTimeout(() => process.exit(0), 400);
+  }, 100);
   if(m.method === 'session/new') setTimeout(() => send({id:m.id, result:{sessionId:'persisted-acp-session'}}), mode === 'slow-new' ? 500 : 0);
   if(m.method === 'session/load') {
     send({method:'session/update',params:{sessionId:m.params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'HISTORICAL_OUTPUT'}}}});
