@@ -47,6 +47,6 @@ MCP 测试以 8 并发反复建立真实 HTTP 连接、鉴权、调用 peer_requ
 
 原始测量报告：[Core](verification/core-soak-2026-11-13.json)、[MCP](verification/mcp-soak-2026-11-13.json)。heap/RSS 是周期采样而非整个区间的绝对峰值；事件循环直方图是整个进程区间的观测。
 
-常规 CI 包含 41 项测试、30 秒 Core 负载及 100 次 MCP 周期。独立的 Extended backend soak 工作流支持手动指定 60–3600 秒，默认一小时；报告作为 GitHub Actions artifact 保存。长工作流已配置，但本次没有执行一小时运行。
+常规 CI 包含 43 项测试、30 秒 Core 负载及 100 次 MCP 周期。独立的 Extended backend soak 工作流支持手动指定 60–3600 秒，默认一小时；报告作为 GitHub Actions artifact 保存。后续已完成本地一小时运行并修复历史查询性能问题，结果见 [一小时复测记录](18-hour-soak-and-scheduler-indexes.md)；GitHub 一小时手动工作流尚未执行。
 
 本地报告和测试数据库保存在 .roundloom/soak、.roundloom/mcp-soak，默认不提交 Git。测量只代表当前 Windows / Node 24 环境下有界负载，不是多日稳定性、所有厂商并发或真实模型吞吐保证。数据库任务与幂等记录有意持久化，事件裁剪不等于数据库总量不增长。

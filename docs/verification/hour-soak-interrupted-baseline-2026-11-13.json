@@ -1,0 +1,41 @@
+{
+  "completed": false,
+  "requestedDurationSeconds": 3600,
+  "stoppedAt": "2026-11-13T11:51:50.905Z",
+  "reason": "Interrupted after confirming history-dependent full scans: 3265 runs, average scan 23.995 ms against a 20 ms scheduler interval; recent task p95 1385 ms. This is not a passed one-hour test.",
+  "totals": [
+    {
+      "kind": "artifact",
+      "count": 1536
+    },
+    {
+      "kind": "member",
+      "count": 10
+    },
+    {
+      "kind": "message",
+      "count": 6400
+    },
+    {
+      "kind": "peer",
+      "count": 768
+    },
+    {
+      "kind": "room",
+      "count": 1
+    },
+    {
+      "kind": "run",
+      "count": 3328
+    },
+    {
+      "kind": "session",
+      "count": 10
+    },
+    {
+      "kind": "task",
+      "count": 1792
+    }
+  ],
+  "retainedEventsFrom": "2026-11-13T11:49:31.839Z"
+}
