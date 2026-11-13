@@ -20,17 +20,23 @@ cwd 必须是现有目录。可选 model 指定模型，executable 指定真实�
 
 ## 权限与协作边界
 
+原生适配器支持 timeoutMs（默认 120000，范围 1000–600000）。超时标记 unknown，原因是 provider_timeout 或已捕获的 provider_connection_failed，不伪造成功或已取消。Codex 的重连 error 事件不是终态；收到 turn.completed / turn.failed 后立即关闭事件迭代器，避免等待 CLI 退出导致已完成的请求被超时覆盖。原因码不会包含原始服务错误、URL 或认证材料。
+
 Claude 注入 roundloom MCP 服务，提供 members、peer_request、peer_reply。工具绑定当前运行身份，Core 校验房间、任务与回复范围。内部协作工具自动允许，其余需要 SDK 请求授权的调用转为 permission interaction；SDK 自身的自动允许规则仍由原生运行时控制。
 
-Codex 使用 approvalPolicy=never、禁用网络及 webSearch，默认只读沙箱，目前没有同伴 MCP 工具，peerMessaging=false。不得把 Claude 的同伴能力套用到 Codex 或 ACP。跨厂商真实协作仍需专项验收。
+Codex 使用 approvalPolicy=never、禁用网络及 webSearch，默认只读沙箱。Codex 和 ACP 的 peerMessaging=false，不能主动调用同伴求助工具，但适配器会把成功结束的、明确关联 peerRequestId 的最终回答交回请求者。Core 仍校验运行身份、房间和接收者；普通输出不会自动触发回复或新任务。Claude 则通过显式 MCP 工具发起和回复求助。
 
 ## 验证
 
-2026-11-13，Windows / Node 24：28 项自动化测试通过，包括原生会话持久化、排队续接、数据库重启续接、权限拒绝、取消、失败和不完整事件流。默认 CI 使用可控 SDK 夹具，不调用收费模型。
+2026-11-13，Windows / Node 24：31 项自动化测试通过，包括原生会话持久化、排队续接、数据库重启续接、权限拒绝、取消、失败和不完整事件流、成功终态关闭迭代器、超时原因脱敏、ACP 定向回复及过期工具作用域。默认 CI 使用可控 SDK 夹具，不调用收费模型。
 
-Claude Code 2.1.281 真实联调通过：第一轮返回固定标记，关闭并重建 Core 后第二轮正确返回仅在上一轮出现的随机标记，两轮均收到原生成功终态。没有操作项目文件，不代表真实编码或跨 Agent 协作已验收。
+Claude Code 2.1.281 与 Codex SDK 默认运行时均通过真实两轮问答：第一轮返回固定标记，关闭并重建 Core 后第二轮正确返回仅在上一轮出现的随机标记，两轮均收到原生成功终态。SDK 版本锁定在 package-lock.json；此结论不外推到所有已安装的 Codex CLI 版本。
 
-Codex SDK 自带运行时及本机 codex-cli 0.147.0 的最小问答均在 60 秒内未完成；尚未定位到认证、服务连接或原生运行时的具体原因，不能标记真实接入通过。取消后临时数据库文件出现 Windows 占用；脚本报告并保留无法清理的目录，失败返回非零退出码。后续脚本已将 Core 数据目录与 Agent 工作目录分离。
+此前 Codex 超时排障观测到连接重置（Windows 10054）、多次重连，以及 turn.completed 后仍等待进程结束。修正终态消费并将测试工作区与数据库目录分离后，默认运行时的两轮实测成功，清理正常；不声称已消除所有网络故障或原生运行时问题。
+
+Claude → OpenCode 1.18.14 → Claude 的真实协作通过：记录一次求助与回复，负责人只续跑一次，三个 Run 均成功。编码模式中 Claude 使用 Write 在隔离目录生成 add.mjs，独立 Node 测试覆盖正数、负数、零、小数，结果 passed；文件产物核验 verified，任务保持 review，仍须用户验收。该场景证明最小编码闭环，不代表大型项目质量或性能验收。
+
+保存证据的编码实测中出现一次临时工作目录仍被占用，脚本如实以非零退出。随后修正 ACP 关闭逻辑：Windows 终止所拥有的进程树并等待退出，Core 等待所有适配器释放。独立使用真实 OpenCode 连接后关闭的复测确认临时目录可删除。编码证据保存在本地 .roundloom/live-evidence/724d97ce-de83-4e6a-9a01-2c06ef90498e，包含退出码 0、产物摘要和完整数据库快照；目录清理结果与业务测试结果分别记录。
 
 手动复测（使用本机账号，可能产生费用）：
 
@@ -38,8 +44,11 @@ Codex SDK 自带运行时及本机 codex-cli 0.147.0 的最小问答均在 60 �
 npm run build
 node dist/scripts/live-native.js claude PATH_TO_CLAUDE_EXE
 node dist/scripts/live-native.js codex PATH_TO_CODEX_EXE
+node dist/scripts/live-collaboration.js PATH_TO_CLAUDE_EXE PATH_TO_OPENCODE_EXE --coding
 ```
 
-脚本只输出状态与校验结果，不输出认证信息。仍待完成：Codex 真实调用排障、真实跨 Agent 求助/恢复、真实工作区编码与产物验收联调。
+脚本只输出状态与校验结果，不输出认证信息。编码脚本只批准目标临时文件的 Write 请求；通过后在 .roundloom/live-evidence 下保存生成代码、SQLite 快照和包含命令、退出码、摘要及产物的报告，默认不提交 Git。测试数据中的原始工作区路径随清理失效，证据用于审计，不能直接当作仍可编辑的工作区恢复。
+
+当前可用于桌面前端对接的后端预览。后续兼容性工作包括 ACP 原生跨进程恢复、Codex 主动同伴工具、更多厂商与复杂真实工程场景；桌面界面与安装包另行交付。
 
 参考：[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/typescript)、[Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)。

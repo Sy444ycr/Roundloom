@@ -28,6 +28,7 @@ const schema = z
     maxTurns: z.number().int().min(1).max(30).default(6),
     maxBudgetUsd: z.number().positive().max(20).default(1),
     sandboxMode: z.enum(["read-only", "workspace-write"]).default("read-only"),
+    timeoutMs: z.number().int().min(1000).max(600000).default(120000),
   })
   .strict();
 type State = "succeeded" | "failed" | "cancelled" | "unknown";
@@ -83,6 +84,11 @@ export class NativeAdapter implements Adapter {
     if (this.disposed) throw new CoreError("CLOSED", "Adapter disposed");
     const config = this.validateConfig(run.config);
     const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, config.timeoutMs);
     this.active.set(run.id, controller);
     this.states.set(run.id, "unknown");
     const send = (event: AdapterEvent) => {
@@ -102,7 +108,9 @@ export class NativeAdapter implements Adapter {
           ? {
               requestId: run.peerRequestId,
               instruction:
-                "Use peer_reply to answer the request, then end your turn.",
+                this.id === "claude"
+                  ? "Use peer_reply to answer the request, then end your turn."
+                  : "Return your answer as your final response. The platform routes it to the requester.",
             }
           : {
               instruction:
@@ -111,6 +119,7 @@ export class NativeAdapter implements Adapter {
     });
     const pending = (async () => {
       let outcome: State = "unknown";
+      let reason: string | undefined;
       let result = "";
       try {
         if (this.id === "codex") {
@@ -141,9 +150,24 @@ export class NativeAdapter implements Adapter {
               result = event.item.text;
               send({ id: randomUUID(), type: "output", text: result });
             }
-            if (event.type === "turn.completed") outcome = "succeeded";
-            if (event.type === "turn.failed" || event.type === "error")
+            if (event.type === "turn.completed") {
+              outcome = "succeeded";
+              break;
+            }
+            if (event.type === "error" || event.type === "turn.failed") {
+              const message =
+                event.type === "error" ? event.message : event.error.message;
+              reason =
+                /10054|connection|connect|stream disconnected|ECONN|fetch failed/i.test(
+                  message,
+                )
+                  ? "provider_connection_failed"
+                  : "provider_error";
+            }
+            if (event.type === "turn.failed") {
               outcome = "failed";
+              break;
+            }
           }
         } else {
           const response = (value: unknown) => ({
@@ -237,14 +261,28 @@ export class NativeAdapter implements Adapter {
             }
           }
         }
-        if (outcome === "succeeded" && result && run.taskId)
-          send({ id: randomUUID(), type: "result", content: result });
+        if (outcome === "succeeded" && result && run.taskId) {
+          if (
+            run.purpose === "peer" &&
+            run.peerRequestId &&
+            this.id === "codex"
+          )
+            tools.replyPeer(run.peerRequestId, result);
+          else if (run.purpose !== "peer")
+            send({ id: randomUUID(), type: "result", content: result });
+        }
       } catch {
         outcome = controller.signal.aborted ? "cancelled" : "unknown";
       } finally {
+        clearTimeout(timer);
+        if (timedOut) {
+          outcome = "unknown";
+          reason ??= "provider_timeout";
+        }
+        if (outcome === "succeeded") reason = undefined;
         this.active.delete(run.id);
         this.states.set(run.id, outcome);
-        send({ id: randomUUID(), type: "state", state: outcome });
+        send({ id: randomUUID(), type: "state", state: outcome, reason });
       }
     })();
     this.pending.add(pending);

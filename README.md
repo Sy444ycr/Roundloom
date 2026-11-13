@@ -12,7 +12,7 @@
 - 权限交互、备份恢复、事件保留和数据库单实例保护。
 - Mock、JSONL CLI 桥接、ACP v1 及 Claude/Codex 原生 SDK 适配器。
 
-OpenCode 1.18.14 已验证 ACP 握手和一次真实问答；Claude Code 已验证真实两轮问答和后端重启续接。Codex 适配器通过协议测试，真实调用仍超时待排查；不宣称全部 Agent 兼容。真实模型调用不属于默认 CI。
+OpenCode 已验证 ACP 接入；Claude Code、Codex 均通过真实两轮问答及后端重启续接。Claude → OpenCode 求助 → Claude 续跑写文件 → 独立测试 → 文件产物核验已跑通，测试通过后仍须用户验收。真实模型调用不属于默认 CI，兼容结论仅覆盖已记录的环境与场景。
 
 ## 快速开始
 

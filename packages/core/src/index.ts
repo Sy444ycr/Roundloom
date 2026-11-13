@@ -865,7 +865,7 @@ export class Core {
       replyPeer: (request, text) => this.replyPeer(runId, request, text),
     };
   }
-  private toolRun(runId: string) {
+  private toolRun(runId: string, requiresPeerTools = true) {
     const r = this.store.get<Run>("run", runId);
     check(
       active(r) && r.status !== "unknown",
@@ -873,7 +873,8 @@ export class Core {
       "Run tool scope expired",
     );
     check(
-      this.adapters.get(r.adapterId)?.capabilities.peerMessaging,
+      !requiresPeerTools ||
+        this.adapters.get(r.adapterId)?.capabilities.peerMessaging,
       "CAPABILITY_UNSUPPORTED",
       "No peer tools",
     );
@@ -948,7 +949,7 @@ export class Core {
       "Invalid reply",
     );
     this.store.transaction(() => {
-      const r = this.toolRun(runId);
+      const r = this.toolRun(runId, false);
       const q = this.store.get<PeerRequest>("peer", requestId);
       check(
         q.roomId === r.roomId &&

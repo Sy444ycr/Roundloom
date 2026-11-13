@@ -214,3 +214,61 @@ test("native cancellation aborts SDK and does not emit a result", async () => {
   );
   adapter.dispose();
 });
+
+test("Codex stops consuming after terminal success and tolerates reconnection events", async () => {
+  let closed = false;
+  const thread = {
+    async runStreamed() {
+      return {
+        events: (async function* (): AsyncGenerator<ThreadEvent> {
+          try {
+            yield { type: "error", message: "Reconnecting: os error 10054" };
+            yield* completed;
+            throw new Error("Must not request events after terminal state");
+          } finally {
+            closed = true;
+          }
+        })(),
+      };
+    },
+  };
+  const adapter = new NativeAdapter("codex", () => ({
+    startThread: () => thread,
+    resumeThread: () => thread,
+  }));
+  const output: AdapterEvent[] = [];
+  const r = run();
+  await adapter.start(r, (e) => output.push(e), tools);
+  await until(() => output.some((e) => e.type === "state"));
+  assert.equal(await adapter.query(r), "succeeded");
+  assert.equal(closed, true);
+  assert.equal(output.find((e) => e.type === "state")?.reason, undefined);
+  await adapter.dispose();
+});
+
+test("native timeout remains unknown and records a sanitized reason", async () => {
+  const adapter = new NativeAdapter("claude", undefined, async function* ({
+    options,
+  }) {
+    await new Promise<void>((_, reject) =>
+      options.abortController!.signal.addEventListener(
+        "abort",
+        () => reject(new Error("secret provider diagnostics")),
+        { once: true },
+      ),
+    );
+    yield {} as SDKMessage;
+  });
+  const output: AdapterEvent[] = [];
+  await adapter.start(
+    { ...run(), config: { cwd: tmpdir(), timeoutMs: 1000 } },
+    (e) => output.push(e),
+    tools,
+  );
+  await until(() => output.some((e) => e.type === "state"));
+  const terminal = output.find((e) => e.type === "state");
+  assert.equal(terminal?.state, "unknown");
+  assert.equal(terminal?.reason, "provider_timeout");
+  assert.equal(JSON.stringify(output).includes("secret"), false);
+  await adapter.dispose();
+});
