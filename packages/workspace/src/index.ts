@@ -249,6 +249,11 @@ export class Workspaces {
     return this.snapshot(w.id);
   }
   async capture(taskId: string, workspaceId: string, expectedVersion: number) {
+    check(
+      !this.store.isArchived(taskId),
+      "ARCHIVED",
+      "Restore task before capturing",
+    );
     const task = this.store.get<Task>("task", taskId);
     const w = this.store.get<Workspace>("workspace", workspaceId);
     check(task.roomId === w.roomId, "FORBIDDEN", "Workspace scope mismatch");
@@ -315,7 +320,7 @@ export class Workspaces {
     const snapshot = await this.snapshot(a.workspaceId);
     const task = this.store.get<Task>("task", a.taskId);
     const evidence = this.store
-      .list<Evidence>("evidence", a.roomId)
+      .historyForTask<Evidence>("evidence", a.taskId)
       .filter(
         (e) =>
           e.taskId === a.taskId &&
@@ -344,6 +349,11 @@ export class Workspaces {
     args: string[],
     timeoutMs: number,
   ) {
+    check(
+      !this.store.isArchived(taskId),
+      "ARCHIVED",
+      "Restore task before testing",
+    );
     const t = this.store.get<Task>("task", taskId);
     const w = this.store.get<Workspace>("workspace", workspaceId);
     check(

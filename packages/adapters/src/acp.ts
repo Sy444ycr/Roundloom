@@ -18,6 +18,8 @@ import { CoreError } from "../../contracts/src/index.js";
 interface Connection {
   child: ChildProcessWithoutNullStreams;
   rpc: ClientConnection;
+  transportClosed?: boolean;
+  ready?: boolean;
   cwd: string;
   nativeSession?: string;
   capabilities: { loadSession?: boolean };
@@ -45,6 +47,25 @@ export class AcpAdapter implements Adapter {
     string,
     "succeeded" | "failed" | "cancelled" | "unknown"
   >();
+  health(sessionId: string) {
+    const c = this.connections.get(sessionId);
+    return {
+      state:
+        c &&
+        c.ready &&
+        !c.transportClosed &&
+        !c.child.stdout.readableEnded &&
+        !c.child.stdout.destroyed &&
+        !c.child.stdin.destroyed &&
+        !c.child.stdin.writableEnded &&
+        c.child.exitCode === null &&
+        c.child.signalCode === null &&
+        !c.child.killed
+          ? ("healthy" as const)
+          : ("disconnected" as const),
+      scope: "local-transport" as const,
+    };
+  }
   validateConfig(config: Record<string, unknown>) {
     const { timeoutMs, resumeSessions, ...processConfig } = z
       .object({
@@ -77,11 +98,15 @@ export class AcpAdapter implements Adapter {
   }
   private async connectOnce(sessionId: string, value: Record<string, unknown>) {
     const existing = this.connections.get(sessionId);
-    if (existing)
+    if (existing && this.health(sessionId).state === "healthy")
       return {
         capabilities: existing.capabilities,
         authMethods: existing.authMethods,
       };
+    if (existing) {
+      this.connections.delete(sessionId);
+      await this.closeConnection(existing);
+    }
     const config = this.validateConfig(value);
     const child = spawn(config.executable, config.args, {
       cwd: config.cwd,
@@ -136,6 +161,9 @@ export class AcpAdapter implements Adapter {
       authMethods: [],
     };
     this.connections.set(sessionId, connection);
+    void rpc.closed.then(() => {
+      connection.transportClosed = true;
+    });
     child.on("error", () => rpc.close());
     child.on("close", () => {
       rpc.close();
@@ -167,6 +195,7 @@ export class AcpAdapter implements Adapter {
         );
       connection.capabilities = init.agentCapabilities ?? {};
       connection.authMethods = init.authMethods ?? [];
+      connection.ready = true;
       return {
         capabilities: connection.capabilities,
         authMethods: connection.authMethods,

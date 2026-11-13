@@ -1,0 +1,36 @@
+{
+  "passed": true,
+  "durationSeconds": 60,
+  "elapsedSeconds": 60.035,
+  "issued": 120,
+  "reviewed": 102,
+  "cancelled": 18,
+  "maxConcurrent": 8,
+  "restarts": 1,
+  "taskP95Ms": 319,
+  "eventLoopP99Ms": 55.640063,
+  "gcAvailable": true,
+  "samples": [
+    {
+      "seconds": 0,
+      "heapMiB": 9.529769897460938,
+      "rssMiB": 60.3125,
+      "issued": 8,
+      "reviewed": 0,
+      "cancelled": 0,
+      "queue": 8
+    },
+    {
+      "seconds": 30,
+      "heapMiB": 10.367576599121094,
+      "rssMiB": 64.8125,
+      "issued": 64,
+      "reviewed": 54,
+      "cancelled": 10,
+      "queue": 0
+    }
+  ],
+  "databaseBytes": 2813952,
+  "node": "v24.16.0",
+  "platform": "win32"
+}

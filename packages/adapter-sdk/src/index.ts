@@ -45,4 +45,9 @@ export interface Adapter {
   ): Promise<unknown>;
   authenticate?(sessionId: string, methodId: string): Promise<unknown>;
   disconnect?(sessionId: string): Promise<void>;
+  // Non-blocking local observation only; never starts a process or calls a model.
+  health?(sessionId: string): {
+    state: "healthy" | "disconnected" | "unknown";
+    scope: "local-transport" | "simulated";
+  };
 }

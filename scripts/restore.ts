@@ -23,7 +23,7 @@ const db = new Database(resolve(source), {
 try {
   if (db.pragma("integrity_check", { simple: true }) !== "ok")
     throw new Error("Backup integrity check failed");
-  if (db.pragma("user_version", { simple: true }) !== 1)
+  if (![1, 2].includes(db.pragma("user_version", { simple: true }) as number))
     throw new Error("Unsupported backup schema");
   await db.backup(destination);
   console.log(

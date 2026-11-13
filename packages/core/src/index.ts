@@ -60,6 +60,11 @@ export class Core {
   private taskHolds = new Set<string>();
   holdTask(taskId: string) {
     check(
+      !this.store.isArchived(taskId),
+      "ARCHIVED",
+      "Restore task before executing work",
+    );
+    check(
       !this.taskHolds.has(taskId) && !this.runs(taskId).some(active),
       "CONFLICT",
       "Task has active work",
@@ -83,7 +88,8 @@ export class Core {
     const m = this.store.get<Member>("member", memberId);
     const a = this.adapters.get(m.adapterId)!;
     const record = {
-      id: m.sessionId,
+      id: "connection:" + m.sessionId,
+      sessionId: m.sessionId,
       roomId: m.roomId,
       memberId,
       status: "connecting",
@@ -133,7 +139,8 @@ export class Core {
     await this.adapters.get(m.adapterId)?.disconnect?.(m.sessionId);
     check(!this.closing && !this.stopped, "CLOSED", "Core is closing");
     const value = {
-      id: m.sessionId,
+      id: "connection:" + m.sessionId,
+      sessionId: m.sessionId,
       roomId: m.roomId,
       memberId,
       status: "disconnected",
@@ -179,6 +186,65 @@ export class Core {
   private cancelDelivered = new Set<string>();
   private lastCancelAttempt = new Map<string, number>();
   private timer?: NodeJS.Timeout;
+  private healthTimer?: NodeJS.Timeout;
+  checkConnections(roomId?: string) {
+    check(!this.closing && !this.stopped, "CLOSED", "Core is closing");
+    if (roomId) this.room(roomId);
+    const records = this.store.list<any>("connection", roomId);
+    const known = new Set(records.map((r) => r.sessionId));
+    for (const member of this.store.list<Member>("member", roomId)) {
+      if (known.has(member.sessionId)) continue;
+      try {
+        if (
+          this.adapters.get(member.adapterId)?.health?.(member.sessionId)
+            .state === "healthy"
+        )
+          records.push({
+            id: "connection:" + member.sessionId,
+            sessionId: member.sessionId,
+            roomId: member.roomId,
+            memberId: member.id,
+            status: "unknown",
+          });
+      } catch {
+        /* An unconnected member has no connection to report. */
+      }
+    }
+    return records.map((record) => {
+      if (record.status === "connecting") return record;
+      const member = this.store.get<Member>("member", record.memberId);
+      const adapter = this.adapters.get(member.adapterId);
+      let health: { state: string; scope: string };
+      try {
+        health = adapter?.health?.(member.sessionId) ?? {
+          state: "unknown",
+          scope: "unsupported",
+        };
+      } catch {
+        health = { state: "unknown", scope: "probe-failed" };
+      }
+      const value = {
+        ...record,
+        health: { ...health, checkedAt: new Date().toISOString() },
+        status:
+          health.state === "disconnected"
+            ? "disconnected"
+            : health.state === "healthy"
+              ? "connected"
+              : record.status,
+      };
+      this.store.transaction(() => {
+        this.store.put("connection", value, value.roomId);
+        if (
+          record.status !== value.status ||
+          record.health?.state !== health.state ||
+          record.health?.scope !== health.scope
+        )
+          this.store.event(value.roomId, "connection.changed", value);
+      });
+      return value;
+    });
+  }
   constructor(path: string, adapters: Adapter[]) {
     this.store = new Store(path);
     for (const a of adapters) {
@@ -227,6 +293,10 @@ export class Core {
       this.timer.unref();
     }
     void this.pump();
+    if (!this.healthTimer) {
+      this.healthTimer = setInterval(() => this.checkConnections(), 5000);
+      this.healthTimer.unref();
+    }
   }
   task(id: string) {
     return this.store.get<Task>("task", id);
@@ -482,9 +552,12 @@ export class Core {
     const t = this.task(p.taskId);
     if (op === "tasks.get") return t;
     if (op === "artifacts.list")
-      return this.store
-        .list<Artifact>("artifact", t.roomId)
-        .filter((a) => a.taskId === t.id);
+      return this.store.historyForTask<Artifact>("artifact", t.id);
+    check(
+      !this.store.isArchived(t.id),
+      "ARCHIVED",
+      "Restore archived task before modifying it",
+    );
     this.version(t, p.expectedVersion);
     if (op === "tasks.cancel") {
       check(
@@ -803,7 +876,7 @@ export class Core {
             );
           })
           .then((result) => {
-            if (this.stopped) return;
+            if (this.stopped || this.store.isArchived(runId)) return;
             this.store.transaction(() => {
               const latest = this.store.get<Run>("run", runId);
               if (result.nativeRef) latest.nativeRef = result.nativeRef;
@@ -812,7 +885,7 @@ export class Core {
             });
           })
           .catch(() => {
-            if (this.stopped) return;
+            if (this.stopped || this.store.isArchived(runId)) return;
             this.store.transaction(() => {
               const latest = this.store.get<Run>("run", runId);
               if (!terminal(latest)) {
@@ -1030,7 +1103,7 @@ export class Core {
     });
   }
   ingest(runId: string, event: AdapterEvent) {
-    if (this.stopped) return;
+    if (this.stopped || this.store.isArchived(runId)) return;
     const schema = z.discriminatedUnion("type", [
       z
         .object({
@@ -1210,6 +1283,7 @@ export class Core {
     if (this.stopped) return;
     this.closing = true;
     clearInterval(this.timer);
+    clearInterval(this.healthTimer);
     // Disposal only releases adapter resources; it does not claim remote cancellation.
     for (const id of [...this.permissions.keys()])
       this.answerPermission(id, null);
