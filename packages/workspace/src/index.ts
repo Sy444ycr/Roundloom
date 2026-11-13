@@ -53,6 +53,7 @@ export async function runCommand(
   signal?: AbortSignal,
   timeoutMs = 60_000,
 ): Promise<{ exitCode: number | null; log: string; cancelled: boolean }> {
+  if (signal?.aborted) return { exitCode: null, log: "", cancelled: true };
   return new Promise((resolveResult) => {
     const child = spawn(executable, args, {
       cwd,
@@ -284,6 +285,7 @@ export class Workspaces {
       digest: snapshot.digest,
       files: snapshot.files,
       requirementsVersion: task.requirementsVersion,
+      ownershipVersion: task.ownershipVersion,
       simulated: false,
       verification: "unverified",
     };
@@ -321,19 +323,17 @@ export class Workspaces {
           e.status === "passed" &&
           e.before.digest === a.digest &&
           e.after?.digest === a.digest &&
-          e.requirementsVersion === a.requirementsVersion,
+          e.requirementsVersion === a.requirementsVersion &&
+          e.ownershipVersion === a.ownershipVersion,
       );
+    const current =
+      snapshot.digest === a.digest &&
+      task.requirementsVersion === a.requirementsVersion &&
+      task.ownershipVersion === a.ownershipVersion;
     return {
       ...a,
-      current:
-        snapshot.digest === a.digest &&
-        task.requirementsVersion === a.requirementsVersion,
-      verification:
-        snapshot.digest === a.digest &&
-        task.requirementsVersion === a.requirementsVersion &&
-        evidence.length
-          ? "verified"
-          : "unverified",
+      current,
+      verification: current && evidence.length ? "verified" : "unverified",
       evidenceIds: evidence.map((e) => e.id),
     };
   }
@@ -392,6 +392,7 @@ export class Workspaces {
         controller.signal,
         timeoutMs,
       );
+      evidence = { ...evidence, ...result, endedAt: new Date().toISOString() };
       const after = await this.snapshot(w.id);
       const latest = this.store.get<Task>("task", t.id);
       evidence = {
@@ -416,7 +417,12 @@ export class Workspaces {
       if (evidence) {
         evidence.status = "unknown";
         evidence.reason = "Evidence capture interrupted";
-        this.store.put("evidence", evidence, t.roomId);
+        evidence.endedAt ??= new Date().toISOString();
+        const interrupted = evidence;
+        this.store.transaction(() => {
+          this.store.put("evidence", interrupted, t.roomId);
+          this.store.event(t.roomId, "test.finished", interrupted);
+        });
       }
       throw error;
     } finally {
