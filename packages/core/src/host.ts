@@ -7,10 +7,17 @@ import { CoreError } from "../../contracts/src/index.js";
 import { z } from "zod";
 import { Services } from "./services.js";
 import { AcpAdapter } from "../../adapters/src/acp.js";
+import { NativeAdapter } from "../../adapters/src/native.js";
 // Trusted parent transport only: no listening TCP port and no remote authentication surface.
 const core = new Core(
   resolve(process.env.ROUNDLOOM_DATA_DIR ?? ".roundloom", "core.db"),
-  [new MockAdapter(), new StructuredCliAdapter(), new AcpAdapter()],
+  [
+    new MockAdapter(),
+    new StructuredCliAdapter(),
+    new AcpAdapter(),
+    new NativeAdapter("claude"),
+    new NativeAdapter("codex"),
+  ],
 );
 const services = new Services(
   core,
@@ -207,5 +214,5 @@ process.on("disconnect", () => void shutdown());
 send({
   type: "core.ready",
   protocolVersion: 1,
-  adapterIds: ["mock", "structured-cli", "acp"],
+  adapterIds: ["mock", "structured-cli", "acp", "claude", "codex"],
 });

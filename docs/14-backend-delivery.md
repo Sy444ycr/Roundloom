@@ -34,6 +34,8 @@
 
 ## 实际验证结果
 
+本节记录基础后端交付时的验证。后续原生适配、28 项测试及真实续接结果见 [原生 Agent 接入](15-native-agent-integration.md)。
+
 环境：Windows x64，Node.js 24.16.0，TypeScript 5.9.3，better-sqlite3 12.11.1，ACP SDK 2.6.0。版本由 package-lock.json 固定。
 
 `npm test`：24 项集成测试通过。覆盖原 19 项，以及真实命令证据、执行中取消、ACP 权限/认证/会话、数据库进程锁与事件裁剪、Git worktree 与备份恢复。`npm run format:check` 校验代码格式。测试在临时目录和夹具上运行，没有使用用户项目作为写入目标。
