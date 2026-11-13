@@ -2,7 +2,12 @@ import Database from "better-sqlite3";
 import { mkdirSync, writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import { CoreError, type StoredEvent } from "../../contracts/src/index.js";
+import {
+  CoreError,
+  type StoredEvent,
+  type Run,
+  type PeerRequest,
+} from "../../contracts/src/index.js";
 export type Kind =
   | "room"
   | "member"
@@ -103,6 +108,14 @@ export class Store {
         CREATE TABLE IF NOT EXISTS requests (request_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, result TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS dispatch (run_id TEXT PRIMARY KEY REFERENCES objects(id), status TEXT NOT NULL CHECK(status IN ('pending','claimed','done')));
         CREATE TABLE IF NOT EXISTS adapter_events (run_id TEXT NOT NULL REFERENCES objects(id), source_id TEXT NOT NULL, PRIMARY KEY(run_id,source_id));
+        CREATE INDEX IF NOT EXISTS objects_active_runs ON objects(json_extract(data, '$.sessionId'))
+          WHERE kind='run' AND json_extract(data, '$.status') IN ('starting','running','unknown');
+        CREATE INDEX IF NOT EXISTS objects_run_task ON objects(json_extract(data, '$.taskId')) WHERE kind='run';
+        CREATE INDEX IF NOT EXISTS objects_peer_task ON objects(json_extract(data, '$.taskId')) WHERE kind='peer';
+        CREATE INDEX IF NOT EXISTS objects_peer_source ON objects(json_extract(data, '$.sourceRunId')) WHERE kind='peer';
+        CREATE INDEX IF NOT EXISTS objects_pending_peer_deadline ON objects(json_extract(data, '$.deadline'))
+          WHERE kind='peer' AND json_extract(data, '$.status')='pending';
+        CREATE INDEX IF NOT EXISTS dispatch_pending ON dispatch(status) WHERE status='pending';
         PRAGMA user_version = 1;
       `);
       })();
@@ -113,6 +126,45 @@ export class Store {
   }
   transaction<T>(fn: () => T): T {
     return this.db.transaction(fn)();
+  }
+  private selectObjects<T>(sql: string, ...params: (string | number)[]): T[] {
+    return (this.db.prepare(sql).all(...params) as { data: string }[]).map(
+      (row) => JSON.parse(row.data) as T,
+    );
+  }
+  activeRuns(sessionId?: string): Run[] {
+    const base =
+      "SELECT data FROM objects INDEXED BY objects_active_runs WHERE kind='run' AND json_extract(data, '$.status') IN ('starting','running','unknown')";
+    return sessionId === undefined
+      ? this.selectObjects<Run>(base + " ORDER BY rowid")
+      : this.selectObjects<Run>(
+          base + " AND json_extract(data, '$.sessionId')=? ORDER BY rowid",
+          sessionId,
+        );
+  }
+  runsForTask(taskId: string): Run[] {
+    return this.selectObjects<Run>(
+      "SELECT data FROM objects WHERE kind='run' AND json_extract(data, '$.taskId')=? ORDER BY rowid",
+      taskId,
+    );
+  }
+  peersForTask(taskId: string): PeerRequest[] {
+    return this.selectObjects<PeerRequest>(
+      "SELECT data FROM objects WHERE kind='peer' AND json_extract(data, '$.taskId')=? ORDER BY rowid",
+      taskId,
+    );
+  }
+  peersForSource(sourceRunId: string): PeerRequest[] {
+    return this.selectObjects<PeerRequest>(
+      "SELECT data FROM objects WHERE kind='peer' AND json_extract(data, '$.sourceRunId')=? ORDER BY rowid",
+      sourceRunId,
+    );
+  }
+  expiredPeers(now: number): PeerRequest[] {
+    return this.selectObjects<PeerRequest>(
+      "SELECT data FROM objects INDEXED BY objects_pending_peer_deadline WHERE kind='peer' AND json_extract(data, '$.status')='pending' AND json_extract(data, '$.deadline')<=? ORDER BY rowid",
+      now,
+    );
   }
   put<T extends { id: string }>(kind: Kind, value: T, roomId: string): T {
     this.db

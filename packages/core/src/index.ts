@@ -126,9 +126,7 @@ export class Core {
     check(!this.closing && !this.stopped, "CLOSED", "Core is closing");
     const m = this.store.get<Member>("member", memberId);
     check(
-      !this.store
-        .list<Run>("run")
-        .some((r) => r.memberId === m.id && active(r)),
+      !this.store.activeRuns().some((r) => r.memberId === m.id && active(r)),
       "CONFLICT",
       "Member has active execution",
     );
@@ -199,7 +197,7 @@ export class Core {
           this.store.event(connection.roomId, "connection.changed", connection);
         }
       }
-      for (const run of this.store.list<Run>("run"))
+      for (const run of this.store.activeRuns())
         if (active(run)) {
           run.status = "unknown";
           this.saveRun(run);
@@ -270,7 +268,7 @@ export class Core {
     return r;
   }
   private runs(taskId: string) {
-    return this.store.list<Run>("run").filter((r) => r.taskId === taskId);
+    return this.store.runsForTask(taskId);
   }
   private version(t: Task, version: number) {
     check(
@@ -517,7 +515,7 @@ export class Core {
           }
           this.saveRun(r);
         }
-      for (const q of this.store.list<PeerRequest>("peer", t.roomId))
+      for (const q of this.store.peersForTask(t.id))
         if (q.taskId === t.id && q.status === "pending") {
           q.status = "cancelled";
           this.store.put("peer", q, q.roomId);
@@ -540,7 +538,7 @@ export class Core {
       );
       check(
         !this.store
-          .list<PeerRequest>("peer", t.roomId)
+          .peersForTask(t.id)
           .some((q) => q.taskId === t.id && q.status === "pending"),
         "CONFLICT",
         "Peer request is still pending",
@@ -591,7 +589,7 @@ export class Core {
       );
       check(
         !this.store
-          .list<PeerRequest>("peer", t.roomId)
+          .peersForTask(t.id)
           .some((q) => q.taskId === t.id && q.status === "pending"),
         "CONFLICT",
         "Resolve pending peer request before handoff",
@@ -690,7 +688,7 @@ export class Core {
     this.pumping = true;
     try {
       for (const r of this.store
-        .list<Run>("run")
+        .activeRuns()
         .filter((r) => active(r) && r.cancelRequested)) {
         const adapter = this.adapters.get(r.adapterId);
         if (!adapter?.capabilities.cancel) continue;
@@ -737,12 +735,7 @@ export class Core {
           });
           continue;
         }
-        if (
-          this.store
-            .list<Run>("run")
-            .some((other) => other.sessionId === r.sessionId && active(other))
-        )
-          continue;
+        if (this.store.activeRuns(r.sessionId).length > 0) continue;
         const adapter = this.adapters.get(r.adapterId);
         if (!adapter) continue;
         const task = r.taskId ? this.task(r.taskId) : undefined;
@@ -939,7 +932,7 @@ export class Core {
       check(recipient.id !== r.memberId, "CONFLICT", "Self waiting cycle");
       check(
         !this.store
-          .list<PeerRequest>("peer", r.roomId)
+          .peersForTask(t.id)
           .some((q) => q.taskId === t.id && q.status === "pending"),
         "CONFLICT",
         "Task already waits for a peer",
@@ -1022,7 +1015,7 @@ export class Core {
   expirePeers() {
     if (this.stopped || this.closing) return;
     this.store.transaction(() => {
-      for (const q of this.store.list<PeerRequest>("peer"))
+      for (const q of this.store.expiredPeers(Date.now()))
         if (q.status === "pending" && q.deadline <= Date.now()) {
           q.status = "expired";
           this.store.put("peer", q, q.roomId);
@@ -1169,9 +1162,7 @@ export class Core {
               this.saveTask(t);
             }
           } else if (currentOwnerRun(t, r)) {
-            const requests = this.store
-              .list<PeerRequest>("peer", r.roomId)
-              .filter((q) => q.sourceRunId === r.id);
+            const requests = this.store.peersForSource(r.id);
             if (e.state !== "succeeded") {
               t.status = "failed";
               t.waitReason = e.reason ?? e.state;
@@ -1228,7 +1219,7 @@ export class Core {
       ),
     );
     this.store.transaction(() => {
-      for (const r of this.store.list<Run>("run"))
+      for (const r of this.store.activeRuns())
         if (active(r)) {
           r.status = "unknown";
           this.saveRun(r);

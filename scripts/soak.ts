@@ -113,9 +113,7 @@ try {
           `Unexpected task status ${task.status}`,
         );
     }
-    const active = core.store
-      .list<Run>("run")
-      .filter((r) => ["starting", "running", "unknown"].includes(r.status));
+    const active = core.store.activeRuns();
     assert.equal(
       new Set(active.map((r) => r.sessionId)).size,
       active.length,
@@ -167,6 +165,13 @@ try {
     await new Promise((r) => setTimeout(r, 25));
   }
   assert.equal(reviewed + cancelled, issued);
+  assert.equal(
+    core.store
+      .list<Run>("run")
+      .filter((r) => ["starting", "running", "unknown"].includes(r.status))
+      .length,
+    0,
+  );
   assert.ok(maxConcurrent >= 2);
   assert.equal(restarts, 1);
   assert.equal(core.store.list<Task>("task").length, issued);
