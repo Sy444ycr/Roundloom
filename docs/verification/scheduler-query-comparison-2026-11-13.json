@@ -1,0 +1,8 @@
+{
+  "runs": 3328,
+  "active": 0,
+  "fullScanAverageMs": 14.791950000000003,
+  "indexedAverageMs": 0.01480199999999968,
+  "fullScanIterations": 20,
+  "indexedIterations": 100
+}

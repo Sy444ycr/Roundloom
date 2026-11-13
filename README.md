@@ -49,6 +49,7 @@ React 界面 → 受限 IPC → Electron Main → 独立 Core → Agent 适配�
 - [原生 Agent 接入与实测](docs/15-native-agent-integration.md)
 - [后端恢复与生命周期加固](docs/16-backend-hardening.md)
 - [Codex 主动求助与持续负载验证](docs/17-codex-peer-and-soak.md)
+- [一小时负载与调度性能修复](docs/18-hour-soak-and-scheduler-indexes.md)
 - [里程碑与验收](docs/04-milestones-and-acceptance.md)
 - [贡献与分支约定](CONTRIBUTING.md)
 
