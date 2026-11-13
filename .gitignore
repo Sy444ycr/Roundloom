@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.roundloom/
+*.db
+*.db-wal
+*.db-shm
+coverage/
+*.db.lock
+*.db.lock.reclaim
+*.log
+.env
+.env.*
+!.env.example
+*.zip
+*.tsbuildinfo

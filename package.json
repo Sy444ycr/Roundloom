@@ -1,0 +1,32 @@
+{
+  "name": "roundloom",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "start": "node dist/packages/core/src/host.js",
+    "demo": "npm run build && node dist/scripts/demo.js",
+    "format": "prettier --write \"packages/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\" package.json tsconfig.json",
+    "format:check": "prettier --check \"packages/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\" package.json tsconfig.json"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^2.6.0",
+    "better-sqlite3": "^12.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^24.0.0",
+    "prettier": "^3.10.1",
+    "typescript": "^5.9.0"
+  }
+}
